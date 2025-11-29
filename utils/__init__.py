@@ -1,0 +1,1 @@
+"""Utils module - Funções utilitárias."""

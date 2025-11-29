@@ -1,0 +1,179 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.whl
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+database/*.db
+database/*.sqlite
+database/*.json
+
+# Logs
+logs/
+*.log
+app.log
+access.log
+error.log
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# Whisper Models (são grandes)
+models/
+*.pt
+*.pth
+
+# Audio files (podem ser grandes)
+audio_library/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+
+# Configuração local
+config.json
+config_local.json
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Backup files
+*.bak
+*.backup
+*.swp
+*~
+
+# Variáveis de ambiente
+.env
+.env.local
+.env.*.local
+
+# Arquivos de desenvolvimento
+.nodeid
+.pytest_nodeid
+
+# Output de testes
+*.coverage
+coverage_html/
+
+# Arquivos de build
+build/
+dist/
+*.egg-info/
+
+# MacOS
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+$RECYCLE.BIN/
+ehthumbs.db
+desktop.ini
+
+# Audio library (local development)
+audio_library/memes/*.mp3
+audio_library/memes/*.wav
+audio_library/efeitos/*.mp3
+audio_library/efeitos/*.wav
+audio_library/notificacoes/*.mp3
+audio_library/notificacoes/*.wav
+
+# Configuration (user overrides)
+config.json
+.env
+
+# Whisper models cache
+~/.cache/whisper/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# IDE temp files
+*.tmp
+*.bak
+*.orig
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Node (if using npm for assets)
+node_modules/
+package-lock.json
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Black
+.black
+
+# Flask
+instance/
+.webassets-cache
+
+# SocketIO
+*.egg-info

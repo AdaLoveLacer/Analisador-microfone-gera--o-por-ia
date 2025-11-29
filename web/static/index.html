@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎙️ Analisador de Microfone com IA</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app" class="app-container">
+        <!-- Navigation -->
+        <nav class="navbar navbar-dark navbar-expand-lg bg-primary sticky-top">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#">
+                    <i class="fas fa-microphone-alt"></i> Analisador de Microfone
+                </a>
+                <div class="d-flex align-items-center gap-3">
+                    <span id="status-indicator" class="badge bg-danger">
+                        <i class="fas fa-circle-notch fa-spin"></i> Desconectado
+                    </span>
+                    <button id="theme-toggle" class="btn btn-sm btn-outline-light">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <div class="container-fluid main-content">
+            <!-- Sidebar -->
+            <div class="row g-0 h-100">
+                <div class="col-auto sidebar bg-light">
+                    <nav class="nav flex-column p-3 gap-2">
+                        <a class="nav-link active" href="#" data-page="dashboard">
+                            <i class="fas fa-chart-line"></i> Dashboard
+                        </a>
+                        <a class="nav-link" href="#" data-page="keywords">
+                            <i class="fas fa-key"></i> Palavras-Chave
+                        </a>
+                        <a class="nav-link" href="#" data-page="sounds">
+                            <i class="fas fa-music"></i> Sons
+                        </a>
+                        <a class="nav-link" href="#" data-page="settings">
+                            <i class="fas fa-cog"></i> Configurações
+                        </a>
+                        <a class="nav-link" href="#" data-page="history">
+                            <i class="fas fa-history"></i> Histórico
+                        </a>
+                        <a class="nav-link" href="#" data-page="backup">
+                            <i class="fas fa-database"></i> Backup
+                        </a>
+                    </nav>
+                </div>
+
+                <!-- Main Content -->
+                <div class="col content-area">
+                    <div class="p-4">
+                        <!-- Dashboard Page -->
+                        <div id="page-dashboard" class="page-content active">
+                            <h2 class="mb-4">Dashboard</h2>
+                            
+                            <!-- Control Buttons -->
+                            <div class="row mb-4">
+                                <div class="col-auto">
+                                    <button id="btn-start" class="btn btn-success btn-lg">
+                                        <i class="fas fa-play"></i> Iniciar Captura
+                                    </button>
+                                    <button id="btn-stop" class="btn btn-danger btn-lg" style="display: none;">
+                                        <i class="fas fa-stop"></i> Parar Captura
+                                    </button>
+                                </div>
+                                <div class="col">
+                                    <div id="capture-status" class="alert alert-info">
+                                        Status: Aguardando...
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Stats Row -->
+                            <div class="row mb-4">
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value" id="stat-detections">0</div>
+                                        <div class="stat-label">Detecções</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value" id="stat-transcriptions">0</div>
+                                        <div class="stat-label">Transcrições</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value" id="stat-uptime">0m</div>
+                                        <div class="stat-label">Tempo de Execução</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value" id="stat-keyword">--</div>
+                                        <div class="stat-label">Última Keyword</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Transcript Section -->
+                            <div class="card mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <i class="fas fa-closed-captioning"></i> Transcrição em Tempo Real
+                                </div>
+                                <div class="card-body">
+                                    <div id="transcript-display" class="transcript-box">
+                                        Aguardando áudio...
+                                    </div>
+                                    <small class="text-muted mt-2">
+                                        Confiança: <span id="transcript-confidence">--</span>%
+                                    </small>
+                                </div>
+                            </div>
+
+                            <!-- Activity Chart -->
+                            <div class="card mb-4">
+                                <div class="card-header bg-primary text-white">
+                                    <i class="fas fa-chart-bar"></i> Atividade (últimas 2 horas)
+                                </div>
+                                <div class="card-body">
+                                    <canvas id="activity-chart" height="80"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Recent Detections -->
+                            <div class="card">
+                                <div class="card-header bg-primary text-white">
+                                    <i class="fas fa-list"></i> Detecções Recentes
+                                </div>
+                                <div class="card-body">
+                                    <div id="recent-detections" class="list-group list-group-flush">
+                                        <div class="list-group-item">Nenhuma detecção ainda...</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Keywords Page -->
+                        <div id="page-keywords" class="page-content">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h2>Palavras-Chave</h2>
+                                <button id="btn-add-keyword" class="btn btn-primary">
+                                    <i class="fas fa-plus"></i> Nova Palavra-Chave
+                                </button>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table id="keywords-table" class="table table-striped table-hover">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Nome</th>
+                                            <th>Padrão</th>
+                                            <th>Som</th>
+                                            <th>Status</th>
+                                            <th>Variações</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="keywords-body">
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted">Carregando...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Import/Export -->
+                            <div class="mt-4 gap-2">
+                                <button id="btn-export-keywords" class="btn btn-secondary">
+                                    <i class="fas fa-download"></i> Exportar
+                                </button>
+                                <button id="btn-import-keywords" class="btn btn-secondary">
+                                    <i class="fas fa-upload"></i> Importar
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Sounds Page -->
+                        <div id="page-sounds" class="page-content">
+                            <div class="d-flex justify-content-between align-items-center mb-4">
+                                <h2>Biblioteca de Sons</h2>
+                                <button id="btn-upload-sound" class="btn btn-primary">
+                                    <i class="fas fa-upload"></i> Upload de Som
+                                </button>
+                            </div>
+
+                            <div class="row" id="sounds-grid">
+                                <div class="col-12 text-center text-muted">Carregando...</div>
+                            </div>
+                        </div>
+
+                        <!-- Settings Page -->
+                        <div id="page-settings" class="page-content">
+                            <h2 class="mb-4">Configurações Avançadas</h2>
+
+                            <div class="accordion" id="settings-accordion">
+                                <!-- Audio Settings -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#settings-audio">
+                                            <i class="fas fa-volume-up"></i> Configurações de Áudio
+                                        </button>
+                                    </h2>
+                                    <div id="settings-audio" class="accordion-collapse collapse show" data-bs-parent="#settings-accordion">
+                                        <div class="accordion-body" id="audio-settings-form"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Whisper Settings -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#settings-whisper">
+                                            <i class="fas fa-language"></i> Configurações do Whisper
+                                        </button>
+                                    </h2>
+                                    <div id="settings-whisper" class="accordion-collapse collapse" data-bs-parent="#settings-accordion">
+                                        <div class="accordion-body" id="whisper-settings-form"></div>
+                                    </div>
+                                </div>
+
+                                <!-- AI Settings -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#settings-ai">
+                                            <i class="fas fa-brain"></i> Configurações de IA
+                                        </button>
+                                    </h2>
+                                    <div id="settings-ai" class="accordion-collapse collapse" data-bs-parent="#settings-accordion">
+                                        <div class="accordion-body" id="ai-settings-form"></div>
+                                    </div>
+                                </div>
+
+                                <!-- UI Settings -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#settings-ui">
+                                            <i class="fas fa-palette"></i> Configurações da Interface
+                                        </button>
+                                    </h2>
+                                    <div id="settings-ui" class="accordion-collapse collapse" data-bs-parent="#settings-accordion">
+                                        <div class="accordion-body" id="ui-settings-form"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-4">
+                                <button id="btn-save-settings" class="btn btn-success">
+                                    <i class="fas fa-save"></i> Salvar Configurações
+                                </button>
+                                <button id="btn-reset-settings" class="btn btn-warning">
+                                    <i class="fas fa-redo"></i> Restaurar Padrões
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- History Page -->
+                        <div id="page-history" class="page-content">
+                            <h2 class="mb-4">Histórico & Logs</h2>
+
+                            <ul class="nav nav-tabs mb-3" id="history-tabs">
+                                <li class="nav-item">
+                                    <a class="nav-link active" href="#" id="tab-detections">Detecções</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="#" id="tab-transcriptions">Transcrições</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" href="#" id="tab-stats">Estatísticas</a>
+                                </li>
+                            </ul>
+
+                            <div id="detections-content">
+                                <div class="table-responsive">
+                                    <table id="detections-table" class="table table-striped">
+                                        <thead class="table-dark">
+                                            <tr>
+                                                <th>Hora</th>
+                                                <th>Texto</th>
+                                                <th>Palavra-Chave</th>
+                                                <th>Confiança</th>
+                                                <th>Contexto</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="detections-body">
+                                            <tr><td colspan="5" class="text-center">Carregando...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <button id="btn-export-detections" class="btn btn-secondary mt-3">
+                                    <i class="fas fa-download"></i> Exportar como CSV
+                                </button>
+                            </div>
+
+                            <div id="transcriptions-content" style="display: none;">
+                                <div class="table-responsive">
+                                    <table id="transcriptions-table" class="table table-striped">
+                                        <thead class="table-dark">
+                                            <tr>
+                                                <th>Hora</th>
+                                                <th>Texto</th>
+                                                <th>Confiança</th>
+                                                <th>Duração</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="transcriptions-body">
+                                            <tr><td colspan="4" class="text-center">Carregando...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div id="stats-content" style="display: none;">
+                                <div id="stats-summary" class="card">
+                                    <div class="card-header">Resumo Estatístico</div>
+                                    <div class="card-body" id="stats-body"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Backup Page -->
+                        <div id="page-backup" class="page-content">
+                            <h2 class="mb-4">Backup & Importação</h2>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card mb-3">
+                                        <div class="card-header bg-success text-white">
+                                            <i class="fas fa-save"></i> Criar Backup
+                                        </div>
+                                        <div class="card-body">
+                                            <p>Crie um backup de todas as configurações e dados.</p>
+                                            <button id="btn-create-backup" class="btn btn-success">
+                                                <i class="fas fa-download"></i> Criar Backup Agora
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <div class="card mb-3">
+                                        <div class="card-header bg-primary text-white">
+                                            <i class="fas fa-upload"></i> Restaurar Backup
+                                        </div>
+                                        <div class="card-body">
+                                            <p>Restaure configurações de um backup anterior.</p>
+                                            <input type="file" id="backup-file-input" accept=".json" style="display: none;">
+                                            <button id="btn-restore-backup" class="btn btn-primary">
+                                                <i class="fas fa-upload"></i> Selecionar Arquivo
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-warning text-dark">
+                                            <i class="fas fa-download"></i> Importar Preset
+                                        </div>
+                                        <div class="card-body">
+                                            <p>Importe um conjunto de configurações pré-definidas.</p>
+                                            <select id="preset-select" class="form-select mb-2">
+                                                <option>Selecione um preset...</option>
+                                                <option value="default">Padrão</option>
+                                                <option value="memes">Memes</option>
+                                                <option value="professional">Profissional</option>
+                                            </select>
+                                            <button id="btn-import-preset" class="btn btn-warning">
+                                                <i class="fas fa-download"></i> Importar
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-info text-white">
+                                            <i class="fas fa-exchange"></i> Exportar Tudo
+                                        </div>
+                                        <div class="card-body">
+                                            <p>Exporte todas as configurações para portabilidade.</p>
+                                            <button id="btn-export-all" class="btn btn-info">
+                                                <i class="fas fa-download"></i> Exportar
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Keyword Modal -->
+    <div class="modal fade" id="keywordModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Palavra-Chave</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="keyword-form-body">
+                    <!-- Form will be inserted here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btn-save-keyword">Salvar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-4.5.4/dist/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- App Scripts -->
+    <script src="/static/js/websocket-client.js"></script>
+    <script src="/static/js/config-manager.js"></script>
+    <script src="/static/js/ui-controller.js"></script>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
