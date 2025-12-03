@@ -71,6 +71,42 @@ def list_devices():
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route("/whisper-devices", methods=["GET"])
+def get_whisper_devices():
+    """Get available Whisper processing devices (CPU/CUDA)."""
+    try:
+        import torch
+        
+        devices = []
+        
+        # Always available: CPU
+        devices.append({
+            "value": "cpu",
+            "label": "💻 CPU (Mais Compatível)",
+            "description": "Funciona em qualquer máquina, mas é mais lento"
+        })
+        
+        # Check if CUDA is available
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            devices.append({
+                "value": "cuda",
+                "label": f"🚀 CUDA - {gpu_name} (Muito Mais Rápido)",
+                "description": f"GPU NVIDIA disponível: {gpu_name} (~10x mais rápido que CPU)"
+            })
+        
+        return jsonify({"devices": devices}), 200
+    except Exception as e:
+        logger.error(f"Error getting Whisper devices: {e}")
+        return jsonify({"devices": [
+            {
+                "value": "cpu",
+                "label": "💻 CPU (Padrão)",
+                "description": "Processador padrão"
+            }
+        ]}), 200
+
+
 # Configuration routes
 @api_bp.route("/config", methods=["GET"])
 def get_config():
@@ -91,9 +127,60 @@ def update_config():
         if not data:
             return jsonify({"error": "No data provided"}), 400
 
-        # Update each key
-        for key, value in data.items():
-            current_app.config_manager.set(key, value, persist=False)
+        # Convert nested dict to dot notation for config_manager
+        def flatten_dict(d, parent_key='', sep='.'):
+            """Convert nested dict to dot-notation."""
+            items = []
+            for k, v in d.items():
+                new_key = f"{parent_key}{sep}{k}" if parent_key else k
+                if isinstance(v, dict):
+                    items.extend(flatten_dict(v, new_key, sep=sep).items())
+                else:
+                    items.append((new_key, v))
+            return dict(items)
+        
+        def convert_value(key, value):
+            """Convert string values to appropriate types based on key name."""
+            if value is None or value == '':
+                return None
+            
+            # If already the right type, return as-is
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)):
+                return value
+            
+            # String conversions
+            if isinstance(value, str):
+                # Boolean values
+                if value.lower() in ('true', 'yes', '1'):
+                    return True
+                if value.lower() in ('false', 'no', '0'):
+                    return False
+                
+                # Integer fields
+                if any(field in key for field in ['device_id', 'chunk_size', 'channels', 'port']):
+                    try:
+                        return int(value)
+                    except ValueError:
+                        pass
+                
+                # Float fields
+                if any(field in key for field in ['threshold', 'weight', 'rate', 'confidence', 'score']):
+                    try:
+                        return float(value)
+                    except ValueError:
+                        pass
+            
+            # Default: return as-is
+            return value
+        
+        flat_config = flatten_dict(data)
+        
+        # Update each key using dot notation with type conversion
+        for key, value in flat_config.items():
+            converted_value = convert_value(key, value)
+            current_app.config_manager.set(key, converted_value, persist=False)
 
         current_app.config_manager.save_config()
         current_app.analyzer.reload_config()

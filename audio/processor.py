@@ -67,15 +67,21 @@ class AudioProcessor:
     def list_devices(self) -> List[dict]:
         """List available audio devices."""
         devices = []
+        try:
+            default_input_device = self.pa.get_default_input_device_info()["index"]
+        except Exception:
+            default_input_device = None
+            
         for i in range(self.pa.get_device_count()):
             try:
                 info = self.pa.get_device_info_by_index(i)
                 devices.append(
                     {
-                        "id": i,
+                        "index": i,
                         "name": info["name"],
-                        "input_channels": info["maxInputChannels"],
-                        "default": i == self.pa.get_default_input_device(),
+                        "max_input_channels": info["maxInputChannels"],
+                        "max_output_channels": info["maxOutputChannels"],
+                        "default_input": i == default_input_device,
                     }
                 )
             except Exception as e:
@@ -94,7 +100,7 @@ class AudioProcessor:
                 channels=self.channels,
                 rate=self.sample_rate,
                 input=True,
-                device_index=self.device_id if self.device_id != -1 else None,
+                input_device_index=self.device_id if self.device_id != -1 else None,
                 frames_per_buffer=self.chunk_size,
                 stream_callback=None,  # We'll use blocking mode
             )
@@ -102,6 +108,11 @@ class AudioProcessor:
             self.is_recording = True
             self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
             self._capture_thread.start()
+
+            # CORREÇÃO: Aguardar um pouco para a fila começar a ser preenchida
+            # Evita o timeout inicial no primeiro get_chunk()
+            import time
+            time.sleep(0.1)
 
             logger.info(f"Audio capture started (device={self.device_id}, sr={self.sample_rate})")
         except Exception as e:

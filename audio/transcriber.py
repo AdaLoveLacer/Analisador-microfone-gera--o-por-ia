@@ -19,7 +19,7 @@ class Transcriber:
         self,
         model_name: str = "base",
         language: str = "pt",
-        device: str = "cpu",
+        device: Optional[str] = None,
         fp16: bool = False,
     ):
         """
@@ -28,18 +28,38 @@ class Transcriber:
         Args:
             model_name: Whisper model name (tiny, base, small, medium, large)
             language: Language code (e.g., 'pt' for Portuguese)
-            device: Device to use (cpu or cuda)
+            device: Device to use (cpu or cuda). If None, auto-detects CUDA
             fp16: Use FP16 precision
         """
+        # Auto-detect CUDA if device not specified
+        if device is None:
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    device = "cuda"
+                    # CORREÇÃO: Usar FP16 em GPU para economizar VRAM
+                    # RTX 3060 tem 12GB, FP16 usa 50% menos memória
+                    if fp16 is False:  # Se não foi explicitamente desativado
+                        fp16 = True
+                    logger.info(f"CUDA GPU detected: {torch.cuda.get_device_name(0)}")
+                    logger.info(f"FP16 precision enabled for GPU (saves VRAM)")
+                else:
+                    device = "cpu"
+                    fp16 = False  # CPU não beneficia de FP16
+            except:
+                device = "cpu"
+                fp16 = False
+        
         self.model_name = model_name
         self.language = language
         self.device = device
         self.fp16 = fp16
+        logger.info(f"Whisper transcriber initialized with device: {device}, fp16: {fp16}")
 
         logger.info(f"Loading Whisper model: {model_name}")
         try:
             self.model = whisper.load_model(model_name, device=device)
-            logger.info(f"Whisper model loaded successfully")
+            logger.info(f"Whisper model loaded successfully on {device}")
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             raise WhisperException(f"Failed to load Whisper model: {e}")
@@ -144,7 +164,8 @@ class TranscriberThread:
             language: Language code
             device: Device to use
         """
-        self.transcriber = Transcriber(model_name, language, device)
+        # CORREÇÃO: Deixar FP16 ser detectado automaticamente pelo Transcriber
+        self.transcriber = Transcriber(model_name, language, device, fp16=False)
         self.input_queue: queue.Queue = queue.Queue(maxsize=10)
         self.output_queue: queue.Queue = queue.Queue(maxsize=10)
         self.is_running = False

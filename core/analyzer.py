@@ -63,43 +63,61 @@ class MicrophoneAnalyzer:
         self._transcription_callbacks = []
         self._detection_callbacks = []
         self._status_callbacks = []
+        self._audio_level_callbacks = []
 
         # Threads
         self._processor_thread: Optional[threading.Thread] = None
         self._event_thread: Optional[threading.Thread] = None
+
+        # Thread synchronization (CORREÇÃO: race conditions)
+        self._state_lock = threading.Lock()
+        self._callback_lock = threading.Lock()
 
         logger.info("MicrophoneAnalyzer initialized")
 
     def start(self) -> None:
         """Start the analyzer."""
         try:
-            if self.is_running:
-                logger.warning("Analyzer already running")
-                return
+            with self._state_lock:
+                if self.is_running:
+                    logger.warning("Analyzer already running")
+                    return
 
-            self.is_running = True
+                self.is_running = True
 
-            # Initialize audio processor
-            audio_config = self.config.get("audio")
-            self.audio_processor = AudioProcessor(
-                device_id=audio_config.get("device_id", -1),
-                sample_rate=audio_config.get("sample_rate", 16000),
-                chunk_size=audio_config.get("chunk_size", 2048),
-                channels=audio_config.get("channels", 1),
-                silence_threshold=audio_config.get("silence_threshold", 0.02),
-            )
+            # CORREÇÃO: Limpeza automática de registros antigos (libera espaço em disco)
+            # Limpar registros com mais de 7 dias a cada inicialização
+            try:
+                self.database.clear_old_records(days=7)
+            except Exception as e:
+                logger.warning(f"Failed to clear old database records: {e}")
+
+            # CORREÇÃO: Reutilizar AudioProcessor ao invés de recriar
+            if not self.audio_processor:
+                audio_config = self.config.get("audio")
+                self.audio_processor = AudioProcessor(
+                    device_id=audio_config.get("device_id", -1),
+                    sample_rate=audio_config.get("sample_rate", 16000),
+                    chunk_size=audio_config.get("chunk_size", 2048),
+                    channels=audio_config.get("channels", 1),
+                    silence_threshold=audio_config.get("silence_threshold", 0.02),
+                )
 
             # Start audio capture
-            self.audio_processor.start()
+            if not self.audio_processor.is_recording:
+                self.audio_processor.start()
 
-            # Initialize transcriber
-            whisper_config = self.config.get("whisper")
-            self.transcriber = TranscriberThread(
-                model_name=whisper_config.get("model", "base"),
-                language=whisper_config.get("language", "pt"),
-                device=whisper_config.get("device", "cpu"),
-            )
-            self.transcriber.start()
+            # CORREÇÃO: Reutilizar Transcriber ao invés de recriar
+            if not self.transcriber:
+                whisper_config = self.config.get("whisper")
+                self.transcriber = TranscriberThread(
+                    model_name=whisper_config.get("model", "base"),
+                    language=whisper_config.get("language", "pt"),
+                    device=whisper_config.get("device", "cpu"),
+                )
+            
+            if hasattr(self.transcriber, 'is_running') and not self.transcriber.is_running:
+                self.transcriber.start()
 
             # Start processing thread
             self._processor_thread = threading.Thread(
@@ -127,14 +145,15 @@ class MicrophoneAnalyzer:
     def stop(self) -> None:
         """Stop the analyzer."""
         try:
-            self.is_running = False
-            self.is_capturing = False
+            with self._state_lock:
+                self.is_running = False
+                self.is_capturing = False
 
             # Stop components
-            if self.audio_processor:
+            if self.audio_processor and self.audio_processor.is_recording:
                 self.audio_processor.stop()
 
-            if self.transcriber:
+            if self.transcriber and hasattr(self.transcriber, 'is_running') and self.transcriber.is_running:
                 self.transcriber.stop()
 
             if self.sound_manager:
@@ -161,6 +180,24 @@ class MicrophoneAnalyzer:
                     chunk = self.audio_processor.get_chunk(timeout=0.5)
                     if chunk is None:
                         continue
+
+                    # Calcular e enviar o nível de áudio
+                    energy = np.sqrt(np.mean(chunk ** 2))
+                    max_energy = np.max(np.abs(chunk))
+                    
+                    # CORREÇÃO: Usar log scale para melhor distribuição de valores
+                    # O áudio já está normalizado em 0-1 pelo Whisper
+                    # Usar escala logarítmica: dB = 20 * log10(amplitude)
+                    # Normalizar para 0-1 com range de -60dB a 0dB
+                    db = 20 * np.log10(max(max_energy, 1e-6))  # Evitar log(0)
+                    normalized_level = max(0.0, min(1.0, (db + 60) / 60))  # Map -60dB a 0dB para 0-1
+                    
+                    with self._callback_lock:
+                        for callback in self._audio_level_callbacks:
+                            try:
+                                callback({"level": float(normalized_level), "energy": float(energy)})
+                            except Exception as e:
+                                logger.error(f"Error in audio level callback: {e}")
 
                     # Add to buffer
                     audio_buffer.append(chunk)
@@ -293,15 +330,23 @@ class MicrophoneAnalyzer:
 
     def register_transcription_callback(self, callback: Callable) -> None:
         """Register callback for transcriptions."""
-        self._transcription_callbacks.append(callback)
+        with self._callback_lock:
+            self._transcription_callbacks.append(callback)
 
     def register_detection_callback(self, callback: Callable) -> None:
         """Register callback for detections."""
-        self._detection_callbacks.append(callback)
+        with self._callback_lock:
+            self._detection_callbacks.append(callback)
 
     def register_status_callback(self, callback: Callable) -> None:
         """Register callback for status updates."""
-        self._status_callbacks.append(callback)
+        with self._callback_lock:
+            self._status_callbacks.append(callback)
+
+    def register_audio_level_callback(self, callback: Callable) -> None:
+        """Register callback for audio level updates."""
+        with self._callback_lock:
+            self._audio_level_callbacks.append(callback)
 
     def _notify_status(self) -> None:
         """Notify status callbacks."""
@@ -310,26 +355,28 @@ class MicrophoneAnalyzer:
             "is_capturing": self.is_capturing,
             "timestamp": datetime.now().isoformat(),
         }
-        for callback in self._status_callbacks:
-            try:
-                callback(status)
-            except Exception as e:
-                logger.error(f"Error in status callback: {e}")
+        with self._callback_lock:
+            for callback in self._status_callbacks:
+                try:
+                    callback(status)
+                except Exception as e:
+                    logger.error(f"Error in status callback: {e}")
 
     def get_status(self) -> Dict[str, Any]:
         """Get current status."""
-        return {
-            "is_running": self.is_running,
-            "is_capturing": self.is_capturing,
-            "current_transcript": self.current_transcript,
-            "last_detected_keyword": self.last_detected_keyword,
-            "audio_queue_size": (
-                self.audio_processor.get_queue_size()
-                if self.audio_processor
-                else 0
-            ),
-            "timestamp": datetime.now().isoformat(),
-        }
+        with self._state_lock:
+            return {
+                "is_running": self.is_running,
+                "is_capturing": self.is_capturing,
+                "current_transcript": self.current_transcript,
+                "last_detected_keyword": self.last_detected_keyword,
+                "audio_queue_size": (
+                    self.audio_processor.get_queue_size()
+                    if self.audio_processor
+                    else 0
+                ),
+                "timestamp": datetime.now().isoformat(),
+            }
 
     def reload_config(self) -> None:
         """Reload configuration from file."""
@@ -343,6 +390,18 @@ class MicrophoneAnalyzer:
 
     def get_devices(self) -> list:
         """Get list of available audio devices."""
-        if self.audio_processor:
-            return self.audio_processor.list_devices()
-        return []
+        try:
+            # Se audio_processor já existe, usar dele
+            if self.audio_processor:
+                return self.audio_processor.list_devices()
+            
+            # Caso contrário, criar um temporário só para listar dispositivos
+            temp_processor = AudioProcessor()
+            devices = temp_processor.list_devices()
+            # Limpar recursos temporários
+            if hasattr(temp_processor, 'pa') and temp_processor.pa:
+                temp_processor.pa.terminate()
+            return devices
+        except Exception as e:
+            logger.warning(f"Error getting audio devices: {e}")
+            return []

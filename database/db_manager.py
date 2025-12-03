@@ -3,7 +3,8 @@
 import sqlite3
 import json
 import logging
-from datetime import datetime
+import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from utils.exceptions import DatabaseException
@@ -28,12 +29,20 @@ class DatabaseManager:
         self.db_dir.mkdir(exist_ok=True)
 
         self.db_path = self.db_dir / self.DEFAULT_DB_FILE
+        self._db_lock = threading.Lock()  # CORREÇÃO: Thread safety
         self._init_database()
 
     def _init_database(self) -> None:
         """Initialize database schema if it doesn't exist."""
         try:
             with self._get_connection() as conn:
+                # Enable WAL (Write-Ahead Logging) para melhor performance
+                conn.execute("PRAGMA journal_mode=WAL;")
+                # Enable auto vacuum para limpar espaço automaticamente
+                conn.execute("PRAGMA auto_vacuum=FULL;")
+                # Synchronous mode NORMAL é mais rápido que FULL
+                conn.execute("PRAGMA synchronous=NORMAL;")
+                
                 cursor = conn.cursor()
 
                 # Check schema version
@@ -163,18 +172,21 @@ class DatabaseManager:
     ) -> int:
         """Add a detection record."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO detections
-                    (text_detected, keyword_matched, confidence, context_score, sound_played)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (text, keyword_matched, confidence, context_score, sound_played),
-                )
-                conn.commit()
-                return cursor.lastrowid
+            def _insert():
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        INSERT INTO detections
+                        (text_detected, keyword_matched, confidence, context_score, sound_played)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (text, keyword_matched, confidence, context_score, sound_played),
+                    )
+                    conn.commit()
+                    return cursor.lastrowid
+            
+            return self._execute_with_lock(_insert)
         except Exception as e:
             logger.error(f"Failed to add detection: {e}")
             raise DatabaseException(f"Failed to add detection: {e}")
@@ -184,17 +196,20 @@ class DatabaseManager:
     ) -> int:
         """Add a transcription record."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO transcriptions (text, confidence, duration_seconds)
-                    VALUES (?, ?, ?)
-                    """,
-                    (text, confidence, duration_seconds),
-                )
-                conn.commit()
-                return cursor.lastrowid
+            def _insert():
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        INSERT INTO transcriptions (text, confidence, duration_seconds)
+                        VALUES (?, ?, ?)
+                        """,
+                        (text, confidence, duration_seconds),
+                    )
+                    conn.commit()
+                    return cursor.lastrowid
+            
+            return self._execute_with_lock(_insert)
         except Exception as e:
             logger.error(f"Failed to add transcription: {e}")
             raise DatabaseException(f"Failed to add transcription: {e}")
@@ -204,18 +219,21 @@ class DatabaseManager:
     ) -> int:
         """Add an event record."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                event_data_json = json.dumps(event_data) if event_data else None
-                cursor.execute(
-                    """
-                    INSERT INTO events (event_type, event_data, level)
-                    VALUES (?, ?, ?)
-                    """,
-                    (event_type, event_data_json, level),
-                )
-                conn.commit()
-                return cursor.lastrowid
+            def _insert():
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    event_data_json = json.dumps(event_data) if event_data else None
+                    cursor.execute(
+                        """
+                        INSERT INTO events (event_type, event_data, level)
+                        VALUES (?, ?, ?)
+                        """,
+                        (event_type, event_data_json, level),
+                    )
+                    conn.commit()
+                    return cursor.lastrowid
+            
+            return self._execute_with_lock(_insert)
         except Exception as e:
             logger.error(f"Failed to add event: {e}")
             raise DatabaseException(f"Failed to add event: {e}")
@@ -337,27 +355,47 @@ class DatabaseManager:
             raise DatabaseException(f"Failed to get detection stats: {e}")
 
     def clear_old_records(self, days: int = 30) -> None:
-        """Clear records older than specified days."""
+        """Clear records older than specified days and vacuum database."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cutoff_date = datetime.now().replace(
-                    day=datetime.now().day - days
-                )
+            cutoff_date = datetime.now() - timedelta(days=days)
+            
+            def _cleanup():
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    # Delete old detections
+                    cursor.execute(
+                        "DELETE FROM detections WHERE timestamp < ?",
+                        (cutoff_date,),
+                    )
+                    deleted_detections = cursor.rowcount
+                    
+                    # Delete old transcriptions
+                    cursor.execute(
+                        "DELETE FROM transcriptions WHERE timestamp < ?",
+                        (cutoff_date,),
+                    )
+                    deleted_transcriptions = cursor.rowcount
+                    
+                    # Delete old events
+                    cursor.execute(
+                        "DELETE FROM events WHERE timestamp < ?", (cutoff_date,)
+                    )
+                    deleted_events = cursor.rowcount
 
-                cursor.execute(
-                    "DELETE FROM detections WHERE timestamp < ?", (cutoff_date,)
-                )
-                cursor.execute(
-                    "DELETE FROM transcriptions WHERE timestamp < ?",
-                    (cutoff_date,),
-                )
-                cursor.execute(
-                    "DELETE FROM events WHERE timestamp < ?", (cutoff_date,)
-                )
-
-                conn.commit()
-                logger.info(f"Cleared records older than {days} days")
+                    conn.commit()
+                    
+                    # Vacuum para liberar espaço em disco
+                    cursor.execute("VACUUM;")
+                    conn.commit()
+                    
+                    return deleted_detections, deleted_transcriptions, deleted_events
+            
+            deleted = self._execute_with_lock(_cleanup)
+            logger.info(
+                f"Cleared old records (detections: {deleted[0]}, "
+                f"transcriptions: {deleted[1]}, events: {deleted[2]})"
+            )
         except Exception as e:
             logger.error(f"Failed to clear old records: {e}")
             raise DatabaseException(f"Failed to clear old records: {e}")
@@ -382,10 +420,17 @@ class DatabaseManager:
             raise DatabaseException(f"Failed to export detections: {e}")
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Get database connection."""
+        """Get database connection with thread safety."""
+        # Nota: Lock é adquirido e liberado no caller (com statement)
+        # Este método apenas cria a conexão
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _execute_with_lock(self, func):
+        """Execute function with database lock."""
+        with self._db_lock:
+            return func()
 
     @staticmethod
     def _rows_to_dicts(cursor: sqlite3.Cursor) -> List[Dict[str, Any]]:

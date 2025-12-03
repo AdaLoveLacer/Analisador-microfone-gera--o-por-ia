@@ -48,6 +48,9 @@ env/
 
 # Database
 *.db
+
+# Pip cache (local)
+pip-cache/
 *.sqlite
 *.sqlite3
 database/*.db
@@ -177,3 +180,50 @@ instance/
 
 # SocketIO
 *.egg-info
+
+# Documentação de desenvolvimento (Markdown files)
+ANALISE_CODEBASE.md
+ATIVAR_VENV.md
+AUDIO_CAPTURE_FIXES.md
+AUDIO_VISUALIZATION_INTEGRATION.md
+BUG_FIX_INTERFACES.md
+COMECE_AQUI.md
+CONTRIBUTING.md
+CORRECOES_CRITICAS.md
+CORRECOES_E_VALIDACOES.md
+CUDA_SETUP_GUIDE.md
+DISCO_RIGIDO_FIX.md
+DOCUMENTACAO_COMPLETA.md
+DOCUMENTACAO_INDEX.md
+EXEMPLOS_USO.md
+LEIA-ME-PRIMEIRO.txt
+PLANO_100_PORCENTO.md
+PROJETO_100_PORCENTO.md
+PROJETO_CONCLUIDO.md
+QUICK_START.md
+RELATORIO_TESTES_FINAL.md
+RESUMO_AUDIO_VISUALIZATION.md
+RESUMO_FINAL_README_GITIGNORE.md
+RESUMO_README_GITIGNORE.md
+SETUP.md
+STATUS.md
+STATUS_ATUAL.md
+STATUS_AUDIO_VISUALIZATION_FINAL.md
+TODO_STATUS.md
+TROUBLESHOOTING.md
+TROUBLESHOOTING_AUDIO_VIZ.md
+TUDO_PRONTO.md
+VERIFICACAO.md
+
+# Backup de configurações
+config.backup.*
+
+# Scripts de diagnóstico e teste
+diagnose_system.py
+test_audio_level_callback.py
+test_critical_fixes.py
+test_device_detection.py
+test_socket_debug.py
+
+# Requisitos alternativos
+requirements-cuda.txt

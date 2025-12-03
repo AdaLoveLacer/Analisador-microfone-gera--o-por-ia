@@ -8,9 +8,20 @@ from web.app import create_app
 
 
 @pytest.fixture
-def app():
+def analyzer():
+    """Mock do MicrophoneAnalyzer para testes"""
+    mock_analyzer = MagicMock()
+    mock_config = MagicMock()
+    mock_config.get.return_value = "INFO"
+    mock_analyzer.config = mock_config
+    mock_analyzer.database = MagicMock()
+    return mock_analyzer
+
+
+@pytest.fixture
+def app(analyzer):
     """Cria app Flask para testes"""
-    app = create_app()
+    app = create_app(analyzer)
     app.config['TESTING'] = True
     return app
 

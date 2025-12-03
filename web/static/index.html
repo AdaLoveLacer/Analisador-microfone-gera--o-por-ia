@@ -114,6 +114,20 @@
                                 </div>
                             </div>
 
+                            <!-- Waveform Visualization -->
+                            <div class="card mb-4">
+                                <div class="card-header bg-success text-white">
+                                    <i class="fas fa-wave-square"></i> Visualização de Áudio em Tempo Real
+                                </div>
+                                <div class="card-body">
+                                    <canvas id="waveform-canvas" width="100%" height="200" style="background-color: #1a1a1a; border-radius: 4px;"></canvas>
+                                    <small class="form-text text-muted d-block mt-2">
+                                        <i class="fas fa-info-circle"></i> 
+                                        Visualização do nível de áudio do microfone. Quanto maior a onda, mais intenso o som.
+                                    </small>
+                                </div>
+                            </div>
+
                             <!-- Transcript Section -->
                             <div class="card mb-4">
                                 <div class="card-header bg-primary text-white">
@@ -432,12 +446,25 @@
     </div>
 
     <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/socket.io-4.5.4/dist/socket.io.min.js"></script>
+    <!-- Socket.IO client - local file (matches python-socketio 5.15.0) -->
+    <script src="/static/js/socket.io.min.js"></script>
+    <script>
+        // Debug: Check if Socket.IO loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof io !== 'undefined') {
+                console.log('✓ Socket.IO loaded successfully');
+            } else {
+                console.error('✗ Failed to load Socket.IO - critical error');
+            }
+        });
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- App Scripts -->
     <script src="/static/js/websocket-client.js"></script>
     <script src="/static/js/config-manager.js"></script>
+    <script src="/static/js/settings-manager.js"></script>
+    <script src="/static/js/waveform-visualizer.js"></script>
     <script src="/static/js/ui-controller.js"></script>
     <script src="/static/js/main.js"></script>
 </body>

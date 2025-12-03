@@ -1,6 +1,6 @@
 """Sound playback and management."""
 
-import pygame
+import pygame  # type: ignore
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List

@@ -47,27 +47,27 @@ class TestSilenceDetection:
         """Detecta silêncio em áudio mudo"""
         # Cria áudio praticamente silencioso
         audio = np.random.randn(16000).astype(np.float32) * 0.001
-        is_silent = detect_silence(audio, threshold_db=-50.0)
-        assert is_silent is True
+        is_silent, energy = detect_silence(audio, sample_rate=16000, threshold=0.02)
+        assert bool(is_silent) is True
 
     def test_detect_silence_loud_audio(self):
         """Não detecta silêncio em áudio alto"""
         # Cria áudio com sinal forte
         audio = np.sin(2 * np.pi * 440 * np.arange(16000) / 16000).astype(np.float32)
-        is_silent = detect_silence(audio, threshold_db=-20.0)
-        assert is_silent is False
+        is_silent, energy = detect_silence(audio, sample_rate=16000, threshold=0.02)
+        assert bool(is_silent) is False
 
     def test_detect_silence_threshold_boundary(self):
         """Testa limiar de detecção"""
         audio = np.random.randn(16000).astype(np.float32) * 0.1
         
         # Com limiar muito baixo, não deve detectar silêncio
-        is_silent_low = detect_silence(audio, threshold_db=-80.0)
-        assert is_silent_low is False
+        is_silent_low, _ = detect_silence(audio, sample_rate=16000, threshold=0.001)
+        assert bool(is_silent_low) is False
         
         # Com limiar muito alto, deve detectar silêncio
-        is_silent_high = detect_silence(audio, threshold_db=-10.0)
-        # Resultado depende da energia do áudio
+        is_silent_high, _ = detect_silence(audio, sample_rate=16000, threshold=1.0)
+        assert bool(is_silent_high) is True
 
 
 class TestAudioEnergy:
@@ -135,7 +135,7 @@ class TestResampling:
     def test_resample_audio_basic(self):
         """Testa reamostragem básica"""
         audio = np.sin(2 * np.pi * 440 * np.arange(16000) / 16000).astype(np.float32)
-        resampled = resample_audio(audio, src_sr=16000, tgt_sr=8000)
+        resampled = resample_audio(audio, original_sr=16000, target_sr=8000)
         
         # Deve ter metade das amostras
         assert len(resampled) == len(audio) // 2
@@ -143,14 +143,14 @@ class TestResampling:
     def test_resample_audio_same_rate(self):
         """Resampling com mesma taxa não altera"""
         audio = np.random.randn(16000).astype(np.float32)
-        resampled = resample_audio(audio, src_sr=16000, tgt_sr=16000)
+        resampled = resample_audio(audio, original_sr=16000, target_sr=16000)
         
         assert len(resampled) == len(audio)
 
     def test_resample_audio_upsample(self):
         """Testa upsampling"""
         audio = np.sin(2 * np.pi * 440 * np.arange(8000) / 8000).astype(np.float32)
-        resampled = resample_audio(audio, src_sr=8000, tgt_sr=16000)
+        resampled = resample_audio(audio, original_sr=8000, target_sr=16000)
         
         # Deve ter o dobro das amostras
         assert len(resampled) == len(audio) * 2
@@ -163,10 +163,11 @@ class TestAudioIntegration:
         """Normaliza e depois detecta silêncio"""
         audio = np.random.randn(16000).astype(np.float32) * 0.01
         normalized = normalize_audio(audio, target_db=-40.0)
-        is_silent = detect_silence(normalized, threshold_db=-30.0)
+        is_silent, energy = detect_silence(normalized, sample_rate=16000, threshold=0.5)
         
         # Não deve falhar
         assert isinstance(is_silent, (bool, np.bool_))
+        assert isinstance(energy, (float, np.floating))
 
     def test_apply_gain_preserve_silence(self):
         """Ganho negativo não cria ruído em silêncio"""

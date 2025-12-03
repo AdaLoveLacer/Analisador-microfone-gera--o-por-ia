@@ -48,12 +48,29 @@ class ContextAnalyzer:
         Args:
             embedding_model_name: Name of sentence transformer model to use
         """
+        self.embedding_model_name = embedding_model_name
+        self.model = None  # Lazy load
+        self.device = None
+        self.embedding_cache = EmbeddingCache(max_size=1000)
+        logger.info(f"ContextAnalyzer initialized (lazy loading)")
+
+    def _load_model(self):
+        """Load model lazily on first use."""
+        if self.model is not None:
+            return
+        
         try:
             from sentence_transformers import SentenceTransformer
+            import torch
 
-            self.model = SentenceTransformer(embedding_model_name)
-            self.embedding_cache = EmbeddingCache(max_size=1000)
-            logger.info(f"Embedding model loaded: {embedding_model_name}")
+            # Detecta device disponível (CUDA > CPU)
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Loading embedding model on device: {self.device}")
+            if self.device == "cuda":
+                logger.info(f"CUDA GPU detected: {torch.cuda.get_device_name(0)}")
+
+            self.model = SentenceTransformer(self.embedding_model_name, device=self.device)
+            logger.info(f"Embedding model loaded: {self.embedding_model_name}")
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
             raise
@@ -204,6 +221,9 @@ class ContextAnalyzer:
             Embedding vector or None if error
         """
         try:
+            # Load model if not loaded
+            self._load_model()
+            
             # Check cache
             cached = self.embedding_cache.get(text)
             if cached is not None:

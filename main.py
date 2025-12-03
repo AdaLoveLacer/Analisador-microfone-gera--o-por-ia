@@ -6,6 +6,9 @@ import signal
 import logging
 from pathlib import Path
 
+# NOTA: Não fazer monkey_patch aqui - Flask-SocketIO com gevent async_mode
+# gerencia tudo automaticamente sem necessidade de patch global
+
 # Setup paths
 BASE_DIR = Path(__file__).parent
 sys.path.insert(0, str(BASE_DIR))

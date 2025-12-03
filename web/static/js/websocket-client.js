@@ -18,6 +18,13 @@ class WebSocketClient {
 
     connect() {
         try {
+            // Check if Socket.IO is loaded
+            if (typeof io === 'undefined') {
+                console.error('Socket.IO library not loaded. Make sure socket.io script is included.');
+                setTimeout(() => this.connect(), 1000);
+                return;
+            }
+
             this.socket = io(this.serverUrl, {
                 reconnection: true,
                 reconnectionDelay: 1000,
@@ -46,6 +53,9 @@ class WebSocketClient {
             this.socket.on('keyword_detected', (data) => this._trigger('keyword_detected', data));
             this.socket.on('config_updated', (data) => this._trigger('config_updated', data));
             this.socket.on('status_update', (data) => this._trigger('status_update', data));
+            this.socket.on('audio_level', (data) => this._handleAudioLevel(data));
+            this.socket.on('capture_started', (data) => this._handleCaptureStarted(data));
+            this.socket.on('capture_stopped', (data) => this._handleCaptureStopped(data));
             this.socket.on('error', (data) => this._trigger('error', data));
             this.socket.on('connection_response', (data) => console.log('Server:', data));
 
@@ -119,7 +129,34 @@ class WebSocketClient {
     getStatus() {
         this.emit('get_status');
     }
-}
 
-// Create global WebSocket client
-const wsClient = new WebSocketClient();
+    /**
+     * Handle audio level update
+     */
+    _handleAudioLevel(data) {
+        const level = data.level || 0;
+        if (window.waveformVisualizer) {
+            window.waveformVisualizer.updateAudioLevel(level);
+        }
+    }
+
+    /**
+     * Handle capture started
+     */
+    _handleCaptureStarted(data) {
+        if (window.waveformVisualizer) {
+            window.waveformVisualizer.startCapture();
+        }
+        this._trigger('capture_started', data);
+    }
+
+    /**
+     * Handle capture stopped
+     */
+    _handleCaptureStopped(data) {
+        if (window.waveformVisualizer) {
+            window.waveformVisualizer.stopCapture();
+        }
+        this._trigger('capture_stopped', data);
+    }
+}

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Socket.IO Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #00ff00; }
+        .log { margin: 10px 0; padding: 8px; background: #2d2d2d; border-left: 3px solid #00ff00; }
+        .error { border-left-color: #ff0000; color: #ff0000; }
+        .success { border-left-color: #00ff00; color: #00ff00; }
+    </style>
+</head>
+<body>
+    <h1>🔌 Socket.IO Connection Test</h1>
+    <div id="logs"></div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        const logsDiv = document.getElementById('logs');
+        
+        function log(message, isError = false, isSuccess = false) {
+            const div = document.createElement('div');
+            div.className = 'log';
+            if (isError) div.className += ' error';
+            if (isSuccess) div.className += ' success';
+            div.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            logsDiv.appendChild(div);
+            console.log(message);
+        }
+
+        log('Iniciando teste de Socket.IO...');
+        
+        // Conectar
+        const socket = io('http://localhost:5000', {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5
+        });
+
+        socket.on('connect', () => {
+            log('✅ Socket conectado com sucesso!', false, true);
+            log('   Socket ID: ' + socket.id);
+            
+            // Testar emissão
+            socket.emit('get_status', {}, (response) => {
+                log('   Status recebido: ' + JSON.stringify(response));
+            });
+        });
+
+        socket.on('disconnect', () => {
+            log('❌ Socket desconectado', true);
+        });
+
+        socket.on('connect_error', (error) => {
+            log('❌ Erro de conexão: ' + error.message, true);
+        });
+
+        socket.on('error', (error) => {
+            log('❌ Erro: ' + error, true);
+        });
+
+        socket.on('status_update', (data) => {
+            log('📊 Status atualizado: ' + JSON.stringify(data));
+        });
+
+        // Test timeout
+        setTimeout(() => {
+            if (!socket.connected) {
+                log('⏱️  Timeout: Socket não conectou em 5s', true);
+            }
+        }, 5000);
+    </script>
+</body>
+</html>

@@ -183,9 +183,6 @@ class ConfigManager {
     }
 }
 
-// Create global config manager
-const configManager = new ConfigManager();
-
 // Initialize config on load
 document.addEventListener('DOMContentLoaded', async () => {
     try {

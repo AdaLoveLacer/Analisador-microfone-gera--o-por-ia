@@ -20,22 +20,81 @@ REM ======================================
 REM MODO NORMAL - Iniciar Aplicacao
 REM ======================================
 
-REM Verifica se Python está instalado
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo [ERRO] Python nao encontrado. Por favor, instale Python 3.8+
-    echo.
-    echo Baixe em: https://www.python.org/downloads/
-    pause
-    exit /b 1
+REM Verifica se Python global existe SOMENTE para criar venv (sem mensagem)
+if not exist "venv" if not exist ".venv" (
+    python --version >nul 2>&1
+    if errorlevel 1 (
+        echo [ERRO] Python nao encontrado. Por favor, instale Python 3.8+
+        echo.
+        echo Baixe em: https://www.python.org/downloads/
+        echo Marque: "Add Python to PATH"
+        pause
+        exit /b 1
+    )
 )
-
-echo [OK] Python encontrado: 
-python --version
 echo.
 
-REM Verifica/cria ambiente virtual
-if not exist "venv" (
+REM Verifica qual tipo de venv existe
+if exist "venv" (
+    echo [OK] Ambiente virtual encontrado (venv/)
+    REM Se tambem existe .venv, deleta para evitar confusao
+    if exist ".venv" (
+        echo [*] Deletando .venv duplicado...
+        rmdir /s /q ".venv" 2>nul
+        echo [OK] .venv deletado
+    )
+    
+    REM Pergunta se quer fazer limpeza completa
+    echo.
+    echo [?] Opcoes disponiveis:
+    echo    1) Continuar com setup atual (padrao)
+    echo    2) Limpar tudo e reinstalar do zero
+    echo    3) Limpar apenas cache pip
+    echo.
+    set /p setup_option="    Escolha uma opcao (1-3, padrao=1): "
+    if "!setup_option!"=="" set setup_option=1
+    
+    if "!setup_option!"=="2" (
+        echo [*] Limpando ambiente virtual...
+        rmdir /s /q "venv" 2>nul
+        echo [OK] venv deletado
+        echo [*] Limpando cache pip...
+        python -m pip cache purge 2>nul
+        echo [OK] Cache pip limpo
+        echo [*] Criando novo venv...
+        python -m venv venv
+        if errorlevel 1 (
+            echo [ERRO] Falha ao criar ambiente virtual
+            echo [DICA] Certifique-se de que Python esta instalado e no PATH
+            pause
+            exit /b 1
+        )
+        echo [OK] Novo venv criado
+        REM Ativa o novo venv para instalar dependências
+        call venv\Scripts\activate.bat
+    ) else if "!setup_option!"=="3" (
+        echo [*] Limpando cache pip...
+        call venv\Scripts\activate.bat
+        python -m pip cache purge 2>nul
+        echo [OK] Cache pip limpo
+    )
+) else if exist ".venv" (
+    echo [OK] Ambiente virtual encontrado (.venv/)
+    REM Renomeia para venv para consistencia
+    echo [*] Renomeando .venv para venv...
+    move ".venv" "venv" >nul 2>&1
+    if errorlevel 1 (
+        echo [*] Criando novo venv...
+        rmdir /s /q ".venv" 2>nul
+        python -m venv venv
+        if errorlevel 1 (
+            echo [ERRO] Falha ao criar ambiente virtual
+            pause
+            exit /b 1
+        )
+    )
+    echo [OK] Ambiente virtual pronto
+) else (
     echo [*] Criando ambiente virtual...
     python -m venv venv
     if errorlevel 1 (
@@ -55,37 +114,83 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
+REM Agora SEMPRE usa Python da venv
+set PYTHON_BIN=venv\Scripts\python.exe
 echo [OK] Ambiente virtual ativado
+echo [*] Usando Python da venv: %PYTHON_BIN%
 echo.
 
-REM Verifica se já instalou as dependências
-if not exist "venv\installed.txt" (
-    echo [*] Instalando dependências (primeira execucao)...
+REM Verifica se as dependências estão instaladas (com Python da venv)
+echo [*] Verificando dependências...
+%PYTHON_BIN% -c "import whisper, sentence_transformers, sklearn, thefuzz, flask, socketio, pyaudio, pygame, sqlalchemy" >nul 2>&1
+if errorlevel 1 (
+    echo [AVISO] Algumas dependências estão faltando ou desatualizadas
+    echo.
+    set /p install_deps="Deseja instalar as dependências agora? (s/n): "
+    if /i not "!install_deps!"=="s" (
+        echo [ERRO] Dependências necessárias não estão instaladas
+        echo Use: run.bat --reinstall
+        pause
+        exit /b 1
+    )
+    echo [*] Instalando dependências...
     echo Isso pode levar alguns minutos...
     echo.
-    python -m pip install --upgrade pip --quiet
-    pip install -r requirements.txt --quiet
+    
+    REM Cria diretório de cache se não existir
+    if not exist "pip-cache" mkdir pip-cache
+    
+    REM Atualiza pip primeiro
+    %PYTHON_BIN% -m pip install --upgrade pip --cache-dir pip-cache
+    
+    REM Instala PyTorch com CUDA 11.8 PRIMEIRO (sem --quiet para ver erros reais)
+    echo [*] Instalando PyTorch com CUDA 11.8...
+    echo Isso pode levar alguns minutos...
+    %PYTHON_BIN% -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 --cache-dir pip-cache
+    if errorlevel 1 (
+        echo [AVISO] Falha ao instalar PyTorch com CUDA
+        echo [*] Tentando CPU fallback...
+        %PYTHON_BIN% -m pip install torch torchvision torchaudio --cache-dir pip-cache
+    )
+    echo.
+    
+    REM Agora instala demais dependências
+    echo [*] Instalando demais dependências...
+    %PYTHON_BIN% -m pip install -r requirements.txt --cache-dir pip-cache
     if errorlevel 1 (
         echo [ERRO] Falha ao instalar dependências
         pause
         exit /b 1
     )
-    type nul > venv\installed.txt
+    
     echo [OK] Dependencias instaladas
+    echo.
+) else (
+    echo [OK] Todas as dependências estão instaladas
+    echo.
+    
+    REM Verifica se PyTorch com CUDA está instalado
+    %PYTHON_BIN% -c "import torch; cuda_status = 'CUDA' if torch.cuda.is_available() else 'CPU'; device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'; print(f'PyTorch {torch.__version__} - Device: {device_name}')" 2>nul
+    
     echo.
 )
 
-REM Download do modelo Whisper
+REM Download do modelo Whisper (com Python da venv)
 echo [*] Verificando modelo Whisper...
-python -c "import whisper; whisper.load_model('base')" 2>nul
+%PYTHON_BIN% -c "import whisper; model = whisper.load_model('base'); print('Modelo carregado com sucesso')" >nul 2>&1
 if errorlevel 1 (
-    echo [*] Baixando modelo Whisper (isso pode levar alguns minutos)...
-    python -c "import whisper; whisper.load_model('base')"
-    if errorlevel 1 (
-        echo [AVISO] Falha ao baixar Whisper. Tente mais tarde.
+    echo [*] Tentando baixar modelo Whisper - isso pode levar alguns minutos...
+    %PYTHON_BIN% -c "import whisper; model = whisper.load_model('base')" >nul 2>&1
+    if not errorlevel 1 (
+        echo [OK] Modelo Whisper baixado com sucesso
+    ) else (
+        echo [AVISO] Falha ao baixar Whisper.
+        echo [AVISO] Pode usar o programa sem Whisper, mas nao conseguira transcrever audio.
     )
+) else (
+    echo [OK] Modelo Whisper ja esta pronto
 )
-echo [OK] Modelo Whisper pronto
 echo.
 
 REM Cria diretórios necessários
@@ -95,7 +200,7 @@ if not exist "audio_library\memes" mkdir audio_library\memes 2>nul
 if not exist "audio_library\efeitos" mkdir audio_library\efeitos 2>nul
 if not exist "audio_library\notificacoes" mkdir audio_library\notificacoes 2>nul
 
-REM Inicia a aplicação
+REM Inicia a aplicação usando Python da venv
 echo.
 echo ========================================
 echo [*] Iniciando aplicacao...
@@ -111,7 +216,8 @@ REM Abre a URL no navegador padrão (com delay para o servidor iniciar)
 timeout /t 3 /nobreak >nul
 start http://localhost:5000
 
-python main.py
+REM IMPORTANTE: Sempre usa Python da venv
+%PYTHON_BIN% main.py
 if errorlevel 1 (
     echo.
     echo [ERRO] Falha ao iniciar aplicacao

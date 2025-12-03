@@ -1,5 +1,12 @@
 /* Main Application Entry Point */
 
+// Initialize global managers
+const wsClient = new WebSocketClient();
+const configManager = new ConfigManager();
+const settingsManager = new SettingsManager();
+const uiController = new UIController();
+const waveformVisualizer = new WaveformVisualizer();
+
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('🎙️ Analisador de Microfone - Iniciando...');
 

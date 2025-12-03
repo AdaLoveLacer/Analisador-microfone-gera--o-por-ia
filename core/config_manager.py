@@ -49,10 +49,14 @@ class ConfigManager:
                     f"Default config file not found: {self.default_config_path}"
                 )
 
+            # Validar estrutura mínima (CORREÇÃO)
+            self._validate_config_structure(default_config)
+
             # Load user config if exists
             user_config = {}
             if self.user_config_path.exists():
                 user_config = self._load_json_file(self.user_config_path) or {}
+                self._validate_config_structure(user_config)
 
             # Merge configs (user config overrides defaults)
             self._config = self._deep_merge(default_config, user_config)
@@ -319,4 +323,24 @@ class ConfigManager:
             logger.info("Configuration reset to defaults")
         except Exception as e:
             logger.error(f"Failed to reset configuration: {e}")
-            raise ConfigException(f"Failed to reset configuration: {e}")
+            raise
+
+    def _validate_config_structure(self, config: Dict[str, Any]) -> None:
+        """
+        Validate that config has required sections.
+        
+        Args:
+            config: Configuration dict to validate
+            
+        Raises:
+            ConfigValidationException: If validation fails
+        """
+        required_sections = ["audio", "whisper", "ai", "app"]
+        
+        if not isinstance(config, dict):
+            raise ConfigValidationException("Configuration must be a dictionary")
+        
+        for section in required_sections:
+            if section not in config:
+                logger.warning(f"Missing required config section: {section}")
+                # Não falhar se estiver faltando - usar valores padrão ConfigException(f"Failed to reset configuration: {e}")

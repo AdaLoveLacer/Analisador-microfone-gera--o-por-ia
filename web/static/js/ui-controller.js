@@ -226,20 +226,10 @@ class UIController {
      */
     async _loadSettings() {
         try {
-            const config = configManager.config;
+            // Usar SettingsManager para carregar configurações
+            await settingsManager._loadSettings();
 
-            // Audio settings
-            this._generateSettingsForm('audio-settings-form', config.audio || {}, 'audio');
-
-            // Whisper settings
-            this._generateSettingsForm('whisper-settings-form', config.whisper || {}, 'whisper');
-
-            // AI settings
-            this._generateSettingsForm('ai-settings-form', config.ai || {}, 'ai');
-
-            // UI settings
-            this._generateSettingsForm('ui-settings-form', config.ui || {}, 'ui');
-
+            // Configurar botões de salvar/restaurar
             document.getElementById('btn-save-settings')?.addEventListener('click', () => this._saveSettings());
             document.getElementById('btn-reset-settings')?.addEventListener('click', () => this._resetSettings());
         } catch (error) {
@@ -307,20 +297,34 @@ class UIController {
                 const form = document.getElementById(`${section}-form`);
                 if (form) {
                     const sectionConfig = {};
-                    form.querySelectorAll('[id^="' + section + '-"]').forEach(input => {
-                        const key = input.id.replace(`${section}-`, '');
-                        if (input.type === 'checkbox') {
-                            sectionConfig[key] = input.checked;
-                        } else if (input.type === 'number') {
-                            sectionConfig[key] = parseFloat(input.value);
+                    
+                    // Coletar inputs, selects, e outros campos
+                    form.querySelectorAll('[id^="config-"]').forEach(field => {
+                        const key = field.id.replace('config-', '');
+                        let value;
+                        
+                        if (field.type === 'checkbox') {
+                            value = field.checked;
+                        } else if (field.type === 'number') {
+                            value = parseFloat(field.value) || 0;
+                        } else if (field.tagName === 'SELECT') {
+                            // Para selects, tentar converter para número se possível
+                            value = isNaN(field.value) ? field.value : Number(field.value);
                         } else {
-                            sectionConfig[key] = input.value;
+                            // Input text ou outro
+                            value = field.value;
                         }
+                        
+                        sectionConfig[key] = value;
                     });
-                    config[section] = sectionConfig;
+                    
+                    if (Object.keys(sectionConfig).length > 0) {
+                        config[section] = sectionConfig;
+                    }
                 }
             });
 
+            console.log('Saving config:', config);
             await configManager.saveConfig(config);
             this._showSuccess('Configurações salvas com sucesso!');
         } catch (error) {
@@ -677,27 +681,3 @@ class UIController {
         this._showError('Edição de som em breve!');
     }
 }
-
-// Create global UI controller
-const uiController = new UIController();
-
-// Connect WebSocket and setup callbacks
-document.addEventListener('DOMContentLoaded', () => {
-    wsClient.connect();
-
-    // Register callbacks
-    wsClient.on('transcript_update', (data) => {
-        if (data) uiController.updateTranscript(data.text, data.confidence);
-    });
-
-    wsClient.on('keyword_detected', (data) => {
-        if (data) uiController.updateDetection(data.keyword_id, data.text, data.confidence, data.context_score);
-    });
-
-    wsClient.on('status_update', (data) => {
-        console.log('Status updated:', data);
-    });
-
-    // Initialize dashboard
-    uiController._initializeDashboard();
-});

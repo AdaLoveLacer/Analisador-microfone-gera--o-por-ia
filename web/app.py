@@ -1,11 +1,10 @@
-"""Flask web application and API."""
+"""Flask web application and API with Flask-SocketIO."""
 
 import os
 import logging
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, Response
 from flask_cors import CORS
-from python_socketio import Server, ASGIApp
-import socketio
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 from core.analyzer import MicrophoneAnalyzer
 from core.config_manager import ConfigManager
@@ -25,7 +24,10 @@ def create_app(analyzer: MicrophoneAnalyzer) -> Flask:
     Returns:
         Configured Flask application
     """
-    app = Flask(__name__, static_folder="web/static", static_url_path="/static")
+    # Use absolute path for static folder
+    static_folder = os.path.join(os.path.dirname(__file__), "static")
+    
+    app = Flask(__name__, static_folder=static_folder, static_url_path="/static")
     app.config["JSON_AS_ASCII"] = False
 
     # CORS
@@ -43,20 +45,20 @@ def create_app(analyzer: MicrophoneAnalyzer) -> Flask:
         db_manager=analyzer.database,
     )
 
+    # Setup Flask-SocketIO (com gevent async_mode)
+    sio = SocketIO(
+        app,
+        cors_allowed_origins="*",
+        async_mode="gevent",
+        ping_timeout=60,
+        ping_interval=25
+    )
+    app.sio = sio
+
     # Register blueprints
     from web.api_routes import api_bp
 
     app.register_blueprint(api_bp, url_prefix="/api")
-
-    # Setup WebSocket
-    sio = socketio.Server(
-        async_mode="threading",
-        cors_allowed_origins="*",
-    )
-    app.wsgi = socketio.WSGIApp(sio, app)
-
-    # Store sio reference
-    app.sio = sio
 
     # Register WebSocket handlers
     from web.websocket_handler import setup_websocket_handlers
@@ -67,12 +69,16 @@ def create_app(analyzer: MicrophoneAnalyzer) -> Flask:
     @app.route("/")
     def index():
         """Serve main HTML page."""
-        return app.send_static_file("index.html")
+        index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+        if os.path.exists(index_path):
+            with open(index_path, 'r', encoding='utf-8') as f:
+                return Response(f.read(), mimetype='text/html')
+        return jsonify({"error": "index.html not found"}), 404
 
     @app.route("/static/<path:path>")
     def send_static(path):
         """Serve static files."""
-        return app.send_from_directory("web/static", path)
+        return send_from_directory(os.path.join(os.path.dirname(__file__), "static"), path)
 
     @app.route("/health")
     def health():
@@ -101,7 +107,7 @@ def run_app(
     debug: bool = False,
 ) -> None:
     """
-    Run Flask application.
+    Run Flask application with Flask-SocketIO.
 
     Args:
         analyzer: MicrophoneAnalyzer instance
@@ -111,8 +117,21 @@ def run_app(
     """
     try:
         app = create_app(analyzer)
-        logger.info(f"Starting Flask app on {host}:{port}")
-        app.run(host=host, port=port, debug=debug)
+        
+        logger.info(f"Starting Flask app with Flask-SocketIO on {host}:{port}")
+        logger.info("Using gevent async mode for better compatibility")
+        
+        # Run with Flask-SocketIO (handles both HTTP and WebSocket)
+        # Flask-SocketIO with gevent async_mode handles everything automatically
+        app.sio.run(
+            app,
+            host=host,
+            port=port,
+            debug=debug,
+            use_reloader=False,  # Desabilitar para evitar duplicação
+            log_output=True
+        )
+        
     except Exception as e:
         logger.error(f"Failed to run Flask app: {e}")
         raise
