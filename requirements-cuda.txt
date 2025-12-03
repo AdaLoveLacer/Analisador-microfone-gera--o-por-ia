@@ -1,0 +1,20 @@
+# ============================================
+# PyTorch com CUDA 11.8
+# requirements-cuda.txt
+# IMPORTANTE: Instale PyTorch com CUDA 11.8 ANTES dos outros pacotes
+# ============================================
+
+# Para usar este arquivo:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#
+# OU instale as dependências restantes após PyTorch:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 --cache-dir pip-cache
+# pip install -r requirements.txt --cache-dir pip-cache
+
+# PyTorch com CUDA 11.8 
+# (Use a linha de comando acima em vez de descomente isto)
+# torch>=2.0.0
+# torchvision>=0.15.0
+# torchaudio>=2.0.0
+
+# NOTA: Os demais pacotes devem ser instalados do requirements.txt

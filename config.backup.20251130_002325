@@ -1,0 +1,101 @@
+{
+  "app": {
+    "version": "1.0.0",
+    "debug": false,
+    "log_level": "INFO",
+    "auto_start_capture": false
+  },
+  "audio": {
+    "device_id": 13,
+    "sample_rate": 16000,
+    "chunk_size": 2048,
+    "channels": 1,
+    "min_duration_seconds": 0.5,
+    "silence_threshold": 0.02
+  },
+  "whisper": {
+    "model": "small",
+    "language": "pt",
+    "task": "transcribe",
+    "fp16": true,
+    "device": "cuda"
+  },
+  "ai": {
+    "context_analysis_enabled": true,
+    "min_context_confidence": 0.6,
+    "use_semantic_similarity": true,
+    "embedding_model": "sentence-transformers/distiluse-base-multilingual-cased-v2",
+    "similarity_threshold": 0.7,
+    "context_weight": 0.3
+  },
+  "keywords": [
+    {
+      "id": "key_sus",
+      "name": "Sus",
+      "pattern": "sus",
+      "enabled": true,
+      "sound_id": "sound_sus",
+      "variations": [
+        "suspeitoso",
+        "estranho",
+        "fake",
+        "mentira"
+      ],
+      "context_keywords": [
+        "não acredito",
+        "mente",
+        "fingindo",
+        "duvidoso"
+      ],
+      "weight": 1.0
+    },
+    {
+      "id": "key_cringe",
+      "name": "Cringe",
+      "pattern": "cringe",
+      "enabled": true,
+      "sound_id": "sound_cringe",
+      "variations": [
+        "envergonhado",
+        "desconfortável",
+        "chato"
+      ],
+      "context_keywords": [
+        "vergonha",
+        "incômodo",
+        "desconfortável"
+      ],
+      "weight": 1.0
+    }
+  ],
+  "sounds": [
+    {
+      "id": "sound_sus",
+      "name": "Sus",
+      "file_path": "audio_library/memes/sus.mp3",
+      "volume": 0.8,
+      "enabled": true,
+      "category": "meme"
+    },
+    {
+      "id": "sound_cringe",
+      "name": "Cringe",
+      "file_path": "audio_library/memes/cringe.mp3",
+      "volume": 0.8,
+      "enabled": true,
+      "category": "meme"
+    }
+  ],
+  "ui": {
+    "theme": "dark",
+    "refresh_interval_ms": 100,
+    "show_transcript": true,
+    "show_confidence": true,
+    "max_history_items": 100
+  },
+  "notifications": {
+    "desktop_notify": false,
+    "sound_on_detection": true,
+    "log_detections": true
+  }
+}
