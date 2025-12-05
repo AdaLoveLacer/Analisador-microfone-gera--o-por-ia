@@ -1,0 +1,36 @@
+{
+  "timestamp": "2025-12-04T23:48:50.069400",
+  "duration": 0.05248737335205078,
+  "suites": [
+    {
+      "name": "Unit Tests",
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "success_rate": 0,
+      "tests": []
+    },
+    {
+      "name": "API Tests",
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "success_rate": 0,
+      "tests": []
+    },
+    {
+      "name": "Integration Tests",
+      "total": 0,
+      "passed": 0,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0,
+      "success_rate": 0,
+      "tests": []
+    }
+  ]
+}

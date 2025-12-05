@@ -66,20 +66,6 @@ def create_app(analyzer: MicrophoneAnalyzer) -> Flask:
     setup_websocket_handlers(sio, analyzer)
 
     # Routes
-    @app.route("/")
-    def index():
-        """Serve main HTML page."""
-        index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-        if os.path.exists(index_path):
-            with open(index_path, 'r', encoding='utf-8') as f:
-                return Response(f.read(), mimetype='text/html')
-        return jsonify({"error": "index.html not found"}), 404
-
-    @app.route("/static/<path:path>")
-    def send_static(path):
-        """Serve static files."""
-        return send_from_directory(os.path.join(os.path.dirname(__file__), "static"), path)
-
     @app.route("/health")
     def health():
         """Health check endpoint."""
@@ -95,6 +81,17 @@ def create_app(analyzer: MicrophoneAnalyzer) -> Flask:
         """Handle 500 errors."""
         logger.error(f"Internal server error: {error}")
         return jsonify({"error": "Internal server error"}), 500
+
+    # Start analyzer when Flask app starts
+    @app.before_request
+    def start_analyzer_once():
+        """Start analyzer on first request."""
+        if not analyzer.is_running:
+            try:
+                analyzer.start()
+                logger.info("Analyzer started on first request")
+            except Exception as e:
+                logger.error(f"Failed to start analyzer: {e}")
 
     logger.info("Flask app created successfully")
     return app

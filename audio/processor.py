@@ -43,6 +43,10 @@ class AudioProcessor:
         self.stream: Optional[pyaudio.Stream] = None
         self.is_recording = False
         self.audio_queue: queue.Queue = queue.Queue(maxsize=100)
+        
+        # Lock para proteger acesso ao stream de áudio (evita race conditions)
+        self._stream_lock = threading.Lock()
+        self._capture_thread: Optional[threading.Thread] = None
 
         self._validate_device()
 
@@ -95,15 +99,34 @@ class AudioProcessor:
                 logger.warning("Recording already in progress")
                 return
 
-            self.stream = self.pa.open(
-                format=pyaudio.paFloat32,
-                channels=self.channels,
-                rate=self.sample_rate,
-                input=True,
-                input_device_index=self.device_id if self.device_id != -1 else None,
-                frames_per_buffer=self.chunk_size,
-                stream_callback=None,  # We'll use blocking mode
-            )
+            # Log tentativa de abertura
+            logger.info(f"Attempting to open audio stream (device={self.device_id}, sr={self.sample_rate})")
+            
+            # Tentar abrir o device
+            try:
+                self.stream = self.pa.open(
+                    format=pyaudio.paFloat32,
+                    channels=self.channels,
+                    rate=self.sample_rate,
+                    input=True,
+                    input_device_index=self.device_id if self.device_id != -1 else None,
+                    frames_per_buffer=self.chunk_size,
+                    stream_callback=None,  # We'll use blocking mode
+                )
+            except Exception as e:
+                logger.error(f"Failed to open audio stream with device {self.device_id}: {e}")
+                logger.warning("Falling back to default audio device")
+                # Tentar com device padrão
+                self.device_id = -1
+                self.stream = self.pa.open(
+                    format=pyaudio.paFloat32,
+                    channels=self.channels,
+                    rate=self.sample_rate,
+                    input=True,
+                    input_device_index=None,  # Use default
+                    frames_per_buffer=self.chunk_size,
+                    stream_callback=None,
+                )
 
             self.is_recording = True
             self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -123,11 +146,20 @@ class AudioProcessor:
         """Stop audio capture."""
         try:
             self.is_recording = False
+            
+            # Aguardar thread de captura terminar
+            if self._capture_thread and self._capture_thread.is_alive():
+                self._capture_thread.join(timeout=2.0)
 
-            if self.stream:
-                self.stream.stop_stream()
-                self.stream.close()
-                self.stream = None
+            with self._stream_lock:
+                if self.stream:
+                    try:
+                        self.stream.stop_stream()
+                        self.stream.close()
+                    except Exception as e:
+                        logger.warning(f"Error closing stream: {e}")
+                    finally:
+                        self.stream = None
 
             logger.info("Audio capture stopped")
         except Exception as e:
@@ -136,12 +168,41 @@ class AudioProcessor:
 
     def _capture_loop(self) -> None:
         """Main audio capture loop."""
+        import time
         try:
+            logger.info(f"Audio capture loop started. Device: {self.device_id}, SR: {self.sample_rate}")
+            error_count = 0
+            max_errors = 10
+            consecutive_errors = 0
+            
             while self.is_recording:
                 try:
-                    # Read audio chunk
-                    audio_bytes = self.stream.read(self.chunk_size, exception_on_overflow=False)
+                    # Verificar se o stream ainda é válido
+                    with self._stream_lock:
+                        if not self.stream or not self.is_recording:
+                            break
+                        
+                        # Read audio chunk com proteção
+                        try:
+                            audio_bytes = self.stream.read(self.chunk_size, exception_on_overflow=False)
+                        except OSError as e:
+                            # Stream foi fechado ou dispositivo desconectado
+                            logger.error(f"Stream read OSError: {e}")
+                            break
+                    
+                    if not audio_bytes or len(audio_bytes) == 0:
+                        logger.warning("Empty audio bytes received from stream")
+                        consecutive_errors += 1
+                        if consecutive_errors > max_errors:
+                            logger.error(f"Too many empty reads ({consecutive_errors}), stopping capture")
+                            break
+                        time.sleep(0.01)  # Pequena pausa antes de tentar novamente
+                        continue
+                    
                     audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
+                    
+                    # Reset error count on successful read
+                    consecutive_errors = 0
 
                     # Check if queue is full
                     if self.audio_queue.full():
@@ -150,15 +211,39 @@ class AudioProcessor:
                         except queue.Empty:
                             pass
 
-                    # Add to queue
-                    self.audio_queue.put(audio_data)
+                    # Add to queue (non-blocking para evitar deadlock)
+                    try:
+                        self.audio_queue.put_nowait(audio_data)
+                    except queue.Full:
+                        pass  # Ignorar se a fila estiver cheia
 
-                except Exception as e:
-                    logger.error(f"Error in capture loop: {e}")
+                except IOError as e:
+                    # Erro de I/O no stream de áudio - provavelmente dispositivo desconectado
+                    logger.error(f"Audio I/O error: {e}")
                     break
+                    
+                except Exception as e:
+                    consecutive_errors += 1
+                    error_count += 1
+                    
+                    # Avoid spamming the logs every single error; escalate severity
+                    if consecutive_errors <= 3:
+                        logger.warning(f"Error in capture loop (attempt {consecutive_errors}): {e}")
+                    elif consecutive_errors < max_errors:
+                        logger.error(f"Error in capture loop (attempt {consecutive_errors}): {e}")
+                    else:
+                        logger.error(f"Too many capture errors ({consecutive_errors}), stopping: {e}")
+                        break
+
+                    # Exponential backoff to avoid tight restart cycles
+                    backoff = min(2 ** consecutive_errors, 30)
+                    time.sleep(backoff * 0.1)
+                    
         except Exception as e:
             logger.error(f"Capture loop failed: {e}")
+        finally:
             self.is_recording = False
+            logger.info("Audio capture loop ended")
 
     def get_chunk(self, timeout: float = 1.0) -> Optional[np.ndarray]:
         """
@@ -207,6 +292,22 @@ class AudioProcessor:
                 self.audio_queue.get_nowait()
             except queue.Empty:
                 break
+
+    def set_device(self, device_id: int) -> None:
+        """Change audio input device.
+        
+        Args:
+            device_id: New device ID
+        """
+        was_recording = self.is_recording
+        if was_recording:
+            self.stop()
+        
+        self.device_id = device_id
+        self._validate_device()
+        
+        if was_recording:
+            self.start()
 
     def __del__(self):
         """Cleanup on deletion."""

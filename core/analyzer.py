@@ -6,14 +6,17 @@ import logging
 import time
 import numpy as np
 from typing import Optional, Callable, Dict, Any
+from collections import deque
 from datetime import datetime
 
 from core.config_manager import ConfigManager
 from core.event_logger import get_logger
 from audio.processor import AudioProcessor
 from audio.transcriber import TranscriberThread
+from audio.audio_utils import apply_gain
 from ai.keyword_detector import KeywordDetector
 from ai.context_analyzer import ContextAnalyzer
+from ai.llm_engine import LLMEngine
 from sound.player import SoundManager
 from database.db_manager import DatabaseManager
 
@@ -46,6 +49,7 @@ class MicrophoneAnalyzer:
         # AI components
         self.keyword_detector = KeywordDetector(self.config.get_keywords())
         self.context_analyzer = ContextAnalyzer()
+        self.llm_engine = LLMEngine()  # Nova: LLM para análise avançada
 
         # Sound component
         self.sound_manager = SoundManager(self.config.get_sounds())
@@ -68,6 +72,12 @@ class MicrophoneAnalyzer:
         # Threads
         self._processor_thread: Optional[threading.Thread] = None
         self._event_thread: Optional[threading.Thread] = None
+
+        # Restart protection: prevent tight restart loops if capture is failing
+        self._restart_timestamps = deque()
+        self._delayed_restart_scheduled = False
+        # Device change lock to prevent concurrent device changes
+        self._device_change_lock = threading.Lock()
 
         # Thread synchronization (CORREÇÃO: race conditions)
         self._state_lock = threading.Lock()
@@ -92,6 +102,49 @@ class MicrophoneAnalyzer:
             except Exception as e:
                 logger.warning(f"Failed to clear old database records: {e}")
 
+            # START: Restart protection check
+            # Avoid repeated quick restarts when there were multiple restarts recently.
+            try:
+                # Read limits from config with safe defaults
+                restart_limit = int(self.config.get("app.restart_limit", 3))
+                restart_window = float(self.config.get("app.restart_window_seconds", 60.0))
+                cooldown_seconds = float(self.config.get("app.restart_cooldown_seconds", 30.0))
+
+                # Prune old timestamps
+                now_ts = time.time()
+                while self._restart_timestamps and (now_ts - self._restart_timestamps[0]) > restart_window:
+                    self._restart_timestamps.popleft()
+
+                if len(self._restart_timestamps) >= restart_limit:
+                    logger.warning(
+                        "Too many recent analyzer startups: %s within %ss. Scheduling delayed restart in %ss",
+                        len(self._restart_timestamps), restart_window, cooldown_seconds,
+                    )
+
+                    # If we already scheduled a delayed restart, skip scheduling again
+                    if not self._delayed_restart_scheduled:
+                        def delayed_start():
+                            try:
+                                time.sleep(cooldown_seconds)
+                                self._delayed_restart_scheduled = False
+                                # try start again once
+                                self.start()
+                            except Exception as e:
+                                logger.error(f"Delayed restart failed: {e}")
+
+                        self._delayed_restart_scheduled = True
+                        t = threading.Thread(target=delayed_start, daemon=True)
+                        t.start()
+
+                    # Do not proceed with immediate start to avoid loops
+                    self.is_running = False
+                    return
+
+            except Exception as e:
+                # If anything with restart protection fails, just continue to attempt starting
+                logger.debug(f"Restart protection check failed: {e}")
+            # END: Restart protection check
+
             # CORREÇÃO: Reutilizar AudioProcessor ao invés de recriar
             if not self.audio_processor:
                 audio_config = self.config.get("audio")
@@ -109,11 +162,37 @@ class MicrophoneAnalyzer:
 
             # CORREÇÃO: Reutilizar Transcriber ao invés de recriar
             if not self.transcriber:
-                whisper_config = self.config.get("whisper")
+                whisper_config = self.config.get("whisper", {})
+                
+                # Auto-detect device (prefer GPU)
+                device = whisper_config.get("device", "auto")
+                if device == "auto":
+                    try:
+                        import torch
+                        device = "cuda" if torch.cuda.is_available() else "cpu"
+                        logger.info(f"Auto-detected Whisper device: {device}")
+                    except:
+                        device = "cpu"
+                
+                # Criar TranscriberThread com todas as configurações avançadas
                 self.transcriber = TranscriberThread(
                     model_name=whisper_config.get("model", "base"),
                     language=whisper_config.get("language", "pt"),
-                    device=whisper_config.get("device", "cpu"),
+                    device=device,
+                    task=whisper_config.get("task", "transcribe"),
+                    beam_size=whisper_config.get("beam_size", 5),
+                    best_of=whisper_config.get("best_of", 5),
+                    temperature=whisper_config.get("temperature", 0.0),
+                    patience=whisper_config.get("patience", 1.0),
+                    length_penalty=whisper_config.get("length_penalty", 1.0),
+                    suppress_blank=whisper_config.get("suppress_blank", True),
+                    condition_on_previous_text=whisper_config.get("condition_on_previous_text", True),
+                    no_speech_threshold=whisper_config.get("no_speech_threshold", 0.6),
+                    compression_ratio_threshold=whisper_config.get("compression_ratio_threshold", 2.4),
+                    logprob_threshold=whisper_config.get("logprob_threshold", -1.0),
+                    initial_prompt=whisper_config.get("initial_prompt", "Esta é uma transcrição em português brasileiro."),
+                    word_timestamps=whisper_config.get("word_timestamps", False),
+                    hallucination_silence_threshold=whisper_config.get("hallucination_silence_threshold"),
                 )
             
             if hasattr(self.transcriber, 'is_running') and not self.transcriber.is_running:
@@ -130,6 +209,12 @@ class MicrophoneAnalyzer:
                 target=self._event_loop, daemon=True
             )
             self._event_thread.start()
+
+            # Record successful start attempt (timestamp) so restart protection can track
+            try:
+                self._restart_timestamps.append(time.time())
+            except Exception:
+                pass
 
             self.is_capturing = True
             self._notify_status()
@@ -167,12 +252,21 @@ class MicrophoneAnalyzer:
             logger.error(f"Error stopping analyzer: {e}")
 
     def _processing_loop(self) -> None:
-        """Main processing loop."""
+        """Main processing loop with VAD (Voice Activity Detection) for complete sentences."""
         try:
             audio_buffer = []
-            min_duration = self.config.get("audio.min_duration_seconds", 0.5)
+            min_duration = self.config.get("audio.min_duration_seconds", 1.5)
+            max_duration = self.config.get("audio.max_duration_seconds", 15.0)  # Máximo 15 segundos
+            silence_duration_to_stop = self.config.get("audio.silence_duration_to_stop", 1.0)  # 1 segundo de silêncio = fim da frase
             sample_rate = self.config.get("audio.sample_rate", 16000)
             min_samples = int(min_duration * sample_rate)
+            max_samples = int(max_duration * sample_rate)
+            silence_samples_threshold = int(silence_duration_to_stop * sample_rate)
+            
+            # Estado do VAD (Voice Activity Detection)
+            consecutive_silence_samples = 0
+            has_speech_started = False
+            speech_threshold = self.config.get("audio.speech_threshold", 0.015)  # Threshold para detectar fala
 
             while self.is_running:
                 try:
@@ -182,15 +276,22 @@ class MicrophoneAnalyzer:
                         continue
 
                     # Calcular e enviar o nível de áudio
-                    energy = np.sqrt(np.mean(chunk ** 2))
-                    max_energy = np.max(np.abs(chunk))
+                    # CORREÇÃO: Usar RMS para melhor representação visual
+                    # O áudio de microfone típico tem RMS entre 0.001 e 0.3
+                    rms = np.sqrt(np.mean(chunk ** 2))
+                    peak = np.max(np.abs(chunk))
                     
-                    # CORREÇÃO: Usar log scale para melhor distribuição de valores
-                    # O áudio já está normalizado em 0-1 pelo Whisper
-                    # Usar escala logarítmica: dB = 20 * log10(amplitude)
-                    # Normalizar para 0-1 com range de -60dB a 0dB
-                    db = 20 * np.log10(max(max_energy, 1e-6))  # Evitar log(0)
-                    normalized_level = max(0.0, min(1.0, (db + 60) / 60))  # Map -60dB a 0dB para 0-1
+                    # Usar escala logarítmica mais sensível para microfone
+                    # Mapeamento: 0.001 (-60dB) a 0.3 (-10dB) → 0 a 1
+                    # Formula: level = (20*log10(rms) + 60) / 50
+                    if rms > 1e-6:
+                        db = 20 * np.log10(rms)
+                        # Mapear -60dB a -10dB para 0 a 1 (range mais sensível)
+                        normalized_level = max(0.0, min(1.0, (db + 60) / 50))
+                    else:
+                        normalized_level = 0.0
+                    
+                    energy = rms
                     
                     with self._callback_lock:
                         for callback in self._audio_level_callbacks:
@@ -199,23 +300,79 @@ class MicrophoneAnalyzer:
                             except Exception as e:
                                 logger.error(f"Error in audio level callback: {e}")
 
+                    # VAD: Detectar se há fala ou silêncio
+                    is_speech = rms > speech_threshold
+                    
+                    if is_speech:
+                        has_speech_started = True
+                        consecutive_silence_samples = 0
+                    else:
+                        consecutive_silence_samples += len(chunk)
+
+                    # Detect sustained low audio (possible wrong mic gain/threshold)
+                    try:
+                        silence_threshold = (
+                            self.audio_processor.silence_threshold
+                            if self.audio_processor
+                            else self.config.get("audio.silence_threshold", 0.02)
+                        )
+                        if not hasattr(self, "_consecutive_silent_count"):
+                            self._consecutive_silent_count = 0
+
+                        if normalized_level < silence_threshold:
+                            self._consecutive_silent_count += 1
+                        else:
+                            self._consecutive_silent_count = 0
+
+                        # If we've seen a sustained period of silence, warn once every X occurrences
+                        if self._consecutive_silent_count and self._consecutive_silent_count % 50 == 0:
+                            logger.warning(
+                                "Sustained low audio detected (normalized_level=%.4f < threshold=%.4f) - check microphone gain or silence_threshold",
+                                normalized_level,
+                                silence_threshold,
+                            )
+                    except Exception:
+                        pass
+
                     # Add to buffer
                     audio_buffer.append(chunk)
-
-                    # Check if we have enough audio
                     total_samples = sum(len(c) for c in audio_buffer)
-                    if total_samples >= min_samples:
+
+                    # Decidir quando enviar para transcrição:
+                    # 1. Se atingiu o máximo de duração (forçar envio)
+                    # 2. Se já passou o mínimo E detectou pausa longa após fala
+                    should_transcribe = False
+                    
+                    if total_samples >= max_samples:
+                        # Atingiu máximo - enviar imediatamente
+                        should_transcribe = True
+                        logger.debug(f"Enviando para transcrição: atingiu máximo ({max_duration}s)")
+                    elif total_samples >= min_samples and has_speech_started:
+                        # Já tem o mínimo e detectou fala - verificar se há pausa
+                        if consecutive_silence_samples >= silence_samples_threshold:
+                            should_transcribe = True
+                            logger.debug(f"Enviando para transcrição: pausa detectada após {total_samples/sample_rate:.1f}s de áudio")
+                    
+                    if should_transcribe and len(audio_buffer) > 0:
                         # Combine chunks
                         audio_data = np.concatenate(audio_buffer)
 
-                        # Submit for transcription
-                        self.transcriber.submit_audio(audio_data, sample_rate)
+                        # Apply auto-gain normalization if enabled and submit for transcription
+                        try:
+                            prepared = self._prepare_audio_for_transcription(audio_data, sample_rate)
+                        except Exception as e:
+                            logger.error(f"Error preparing audio for transcription: {e}")
+                            prepared = audio_data
 
-                        # Clear buffer
+                        self.transcriber.submit_audio(prepared, sample_rate)
+
+                        # Clear buffer e resetar VAD
                         audio_buffer = []
+                        consecutive_silence_samples = 0
+                        has_speech_started = False
 
                         # Get transcription result
-                        result = self.transcriber.get_result(timeout=10.0)
+                        result = self.transcriber.get_result(timeout=15.0)
                         if result:
                             self._handle_transcription(result)
 
@@ -258,6 +415,41 @@ class MicrophoneAnalyzer:
 
         except Exception as e:
             logger.error(f"Error handling transcription: {e}")
+
+    def _prepare_audio_for_transcription(self, audio_data: np.ndarray, sample_rate: int) -> np.ndarray:
+        """Apply auto-gain if enabled in config.
+
+        Uses RMS-based dB estimation and applies a limited gain to reach target dB.
+        """
+        try:
+            # Check if auto gain is enabled (default True)
+            auto_gain = bool(self.config.get("audio.auto_gain_enabled", True))
+            if not auto_gain:
+                return audio_data
+
+            target_db = float(self.config.get("audio.target_db", -20.0))
+            max_gain_db = float(self.config.get("audio.max_gain_db", 20.0))
+
+            # Compute current RMS and dB
+            rms = np.sqrt(np.mean(audio_data ** 2)) if audio_data.size > 0 else 0.0
+            current_db = 20 * np.log10(max(rms, 1e-6))
+
+            # If current dB is already >= target, do nothing
+            if current_db >= target_db:
+                return audio_data
+
+            gain_db = target_db - current_db
+            # Cap the gain to avoid extreme amplification
+            gain_db = max(min(gain_db, max_gain_db), -max_gain_db)
+
+            if abs(gain_db) < 0.1:
+                return audio_data
+
+            # Apply gain in dB
+            return apply_gain(audio_data, gain_db)
+        except Exception as e:
+            logger.debug(f"Autotuning failed: {e}")
+            return audio_data
 
     def _detect_keywords(self, text: str) -> None:
         """
@@ -365,6 +557,35 @@ class MicrophoneAnalyzer:
     def get_status(self) -> Dict[str, Any]:
         """Get current status."""
         with self._state_lock:
+            # Informações básicas do Whisper
+            whisper_info = {}
+            if self.transcriber:
+                if hasattr(self.transcriber, 'transcriber'):
+                    # TranscriberThread
+                    whisper_info = {
+                        "whisper_available": True,
+                        "whisper_running": self.transcriber.is_running,
+                        "whisper_model": getattr(self.transcriber.transcriber, 'model_name', 'base'),
+                        "whisper_device": getattr(self.transcriber.transcriber, 'device', 'cpu'),
+                        "whisper_language": getattr(self.transcriber.transcriber, 'language', 'pt'),
+                    }
+                else:
+                    whisper_info = {
+                        "whisper_available": True,
+                        "whisper_running": True,
+                        "whisper_model": getattr(self.transcriber, 'model_name', 'base'),
+                        "whisper_device": getattr(self.transcriber, 'device', 'cpu'),
+                        "whisper_language": getattr(self.transcriber, 'language', 'pt'),
+                    }
+            else:
+                whisper_info = {
+                    "whisper_available": False,
+                    "whisper_running": False,
+                    "whisper_model": None,
+                    "whisper_device": None,
+                    "whisper_language": None,
+                }
+            
             return {
                 "is_running": self.is_running,
                 "is_capturing": self.is_capturing,
@@ -376,6 +597,7 @@ class MicrophoneAnalyzer:
                     else 0
                 ),
                 "timestamp": datetime.now().isoformat(),
+                **whisper_info,
             }
 
     def reload_config(self) -> None:
@@ -386,7 +608,82 @@ class MicrophoneAnalyzer:
             self.sound_manager.update_sounds_config(self.config.get_sounds())
             logger.info("Configuration reloaded")
         except Exception as e:
-            logger.error(f"Error reloading configuration: {e}")
+            logger.error(f"Error reloading config: {e}")
+
+    def set_input_device(self, device_id: int, persist: bool = True) -> None:
+        """
+        Safely change the audio input device.
+
+        Ensures config is updated and restarts the analyzer if necessary in a thread-safe manner.
+
+        Args:
+            device_id: device index (int)
+            persist: whether to persist into config
+        """
+        try:
+            logger.info(f"Requested set_input_device: {device_id}")
+
+            # Determine current device (check both keys for backwards compatibility)
+            current_cfg_device = self.config.get("audio.device_id", None)
+            current_input_device = self.config.get("audio.input_device", None)
+            current_processor_device = (
+                self.audio_processor.device_id if self.audio_processor else None
+            )
+
+            # Prefer processor value if available, then device_id, then input_device
+            current_device = (
+                current_processor_device
+                if current_processor_device is not None
+                else current_cfg_device
+                if current_cfg_device is not None
+                else current_input_device
+            )
+
+            # If value is the same, just persist config and return (no restart)
+            if current_device == device_id:
+                logger.info(f"Input device unchanged (already {device_id}) - updating config only")
+                self.config.set("audio.device_id", device_id, persist=persist)
+                self.config.set("audio.input_device", device_id, persist=persist)
+                return
+
+            # Update config keys consistently
+            self.config.set("audio.device_id", device_id, persist=persist)
+            self.config.set("audio.input_device", device_id, persist=persist)
+
+            # If analyzer running, perform ordered restart to change device safely
+            with self._state_lock:
+                was_running = self.is_running
+
+            if was_running:
+                try:
+                    logger.info("Changing device: performing stop -> set -> start sequence")
+                    # Prevent concurrent device changes
+                    with self._device_change_lock:
+                        # Stop analyzer (this will stop audio processor and transcriber)
+                        self.stop()
+
+                    # Apply device to audio processor
+                    if self.audio_processor:
+                        try:
+                            self.audio_processor.set_device(device_id)
+                        except Exception as e:
+                            logger.error(f"Failed to apply device to audio_processor: {e}")
+
+                        # Restart analyzer
+                        self.start()
+
+                except Exception as e:
+                    logger.error(f"Error while changing input device: {e}")
+            else:
+                # Not running - set device on processor if exists
+                if self.audio_processor:
+                    try:
+                        self.audio_processor.set_device(device_id)
+                    except Exception as e:
+                        logger.error(f"Failed to set device when analyzer not running: {e}")
+
+        except Exception as e:
+            logger.error(f"set_input_device failed: {e}")
 
     def get_devices(self) -> list:
         """Get list of available audio devices."""

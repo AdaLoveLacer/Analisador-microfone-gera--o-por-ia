@@ -10,15 +10,26 @@
     "sample_rate": 16000,
     "chunk_size": 2048,
     "channels": 1,
-    "min_duration_seconds": 0.5,
-    "silence_threshold": 0.02
+    "min_duration_seconds": 1.5,
+    "silence_threshold": 0.02,
+    "auto_gain_enabled": true,
+    "target_db": -20.0,
+    "max_gain_db": 20.0
   },
   "whisper": {
     "model": "base",
     "language": "pt",
     "task": "transcribe",
     "fp16": false,
-    "device": "cpu"
+    "device": "auto",
+    "temperature": 0.0,
+    "beam_size": 5,
+    "best_of": 5,
+    "no_speech_threshold": 0.6,
+    "compression_ratio_threshold": 2.4,
+    "logprob_threshold": -1.0,
+    "condition_on_previous_text": true,
+    "initial_prompt": "Esta é uma transcrição em português brasileiro."
   },
   "ai": {
     "context_analysis_enabled": true,

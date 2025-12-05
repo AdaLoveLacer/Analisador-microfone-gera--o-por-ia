@@ -1,0 +1,45 @@
+# Dependências do Projeto - Analisador de Microfone com IA
+# ===========================================================
+# Formato: TIPO|MODULO|NOME_PACOTE|DESCRICAO
+# 
+# TIPO: python (módulo Python) ou system (dependência de sistema)
+# Para system no Linux: especifique pacote Debian/Ubuntu
+# Para system no macOS: especifique pacote Homebrew
+
+# ============ DEPENDÊNCIAS DO SISTEMA ============
+
+# PortAudio - Interface de áudio multiplataforma
+system|portaudio|portaudio19-dev|PortAudio desenvolvimento (Linux) / portaudio (macOS)|libportaudio2
+system|portaudio_build|build-essential|Ferramentas de compilação (GCC, make, etc)
+
+# ============ DEPENDÊNCIAS PYTHON ============
+
+# Áudio e Processamento
+python|pyaudio|pyaudio|Captura de áudio via PyAudio
+
+# Transcrição e IA
+python|whisper|openai-whisper|Modelo de transcrição de áudio Whisper
+python|torch|torch|PyTorch - Framework de deep learning
+
+# API Web
+python|fastapi|fastapi|Framework web FastAPI (async)
+python|uvicorn|uvicorn|Servidor ASGI para FastAPI
+python|socketio|python-socketio|WebSocket em tempo real
+python|engineio|python-engineio|Engine para transporte em tempo real
+
+# Processamento de Áudio e Dados
+python|scipy|scipy|Processamento científico (espectrogramas, filtros)
+python|numpy|numpy|Processamento numérico e arrays
+
+# Utilitários
+python|requests|requests|Cliente HTTP
+python|dotenv|python-dotenv|Carregamento de variáveis de ambiente
+python|pydantic|pydantic|Validação de dados
+
+# Testes (Opcional)
+python|pytest|pytest|Framework de testes
+
+# ============ NOTAS ============
+# - PyAudio requer PortAudio instalado no sistema
+# - Para compilar PyAudio é necessário GCC/build-essential (Linux) ou Xcode (macOS)
+# - Torch pode ser grande, use a versão CPU se GPU não for necessária

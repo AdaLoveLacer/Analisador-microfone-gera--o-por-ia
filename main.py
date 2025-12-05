@@ -6,9 +6,6 @@ import signal
 import logging
 from pathlib import Path
 
-# NOTA: Não fazer monkey_patch aqui - Flask-SocketIO com gevent async_mode
-# gerencia tudo automaticamente sem necessidade de patch global
-
 # Setup paths
 BASE_DIR = Path(__file__).parent
 sys.path.insert(0, str(BASE_DIR))
@@ -36,7 +33,7 @@ def main():
 
         # Initialize analyzer
         from core.analyzer import MicrophoneAnalyzer
-        from web.app import run_app
+        from web.app_fastapi import run_app
 
         analyzer = MicrophoneAnalyzer(config_dir=".", database_dir=".")
 
@@ -44,13 +41,13 @@ def main():
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        # Start Flask app
-        logger.info("Starting Flask application...")
+        # Start FastAPI app
+        logger.info("Starting FastAPI application...")
         run_app(
             analyzer,
             host="0.0.0.0",
             port=5000,
-            debug=False,
+            reload=False,
         )
 
     except Exception as e:

@@ -1,0 +1,209 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║              RUN.SH - MELHORIAS NA ESPERA DO BACKEND                        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+✅ PROBLEMAS RESOLVIDOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ ANTES (Travava):
+   • Esperava /api/config indefinidamente
+   • Se backend demorasse, script ficava pendurado
+   • Sem feedback sobre o que estava acontecendo
+   • Sem verificação se processo caiu
+
+✅ DEPOIS (Inteligente):
+   • Timeout de 30s para backend, depois continua
+   • Verifica se processo ainda está rodando
+   • Mostra logs se falhar
+   • Tenta iniciar frontend mesmo se backend demorar
+   • Timeout de 60s para frontend (mais tempo para compilação)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🔧 MUDANÇAS PRINCIPAIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Endpoint Melhorado
+   /api/config → /api/status
+   (mais rápido e simples)
+
+2. Verificação de Processo
+   if ! kill -0 $BACKEND_PID 2>/dev/null; then
+       echo "❌ Backend parou"
+       tail -20 /tmp/backend.log
+       exit 1
+   fi
+
+3. Fallback para Frontend
+   if [ $BACKEND_READY -eq 0 ]; then
+       echo "⚠️ Backend demorou, iniciando frontend mesmo assim..."
+   fi
+
+4. Timeout Flexível
+   Backend: 30s → se não responder, mostra aviso mas continua
+   Frontend: 60s → mais tempo pois compila
+
+5. Variáveis de Controle
+   BACKEND_READY=0 / FRONTEND_READY=0
+   (rastreia sucesso de cada etapa)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📊 FLUXO DE EXECUÇÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Start
+  ↓
+[1/6] Verificar Python ... ✓
+  ↓
+[2/6] Criar venv .............. ✓
+  ↓
+[3/6] Atualizar pip ........... ✓
+  ↓
+[4/6] Instalar dependências ... ✓
+  ↓
+[5/6] Validar imports ......... ✓
+  ↓
+[6/6] Criar diretórios ........ ✓
+  ↓
+🚀 Iniciar Backend (background)
+  ↓
+⏳ Aguardar Backend (30s max)
+  │
+  ├─ Responsável? ✅ "Backend pronto"
+  │                     ↓
+  ├─ Parou? ❌ "Parou inesperadamente" → EXIT
+  │
+  └─ Timeout? ⚠️ "Demorou, continuando..." → CONTINUA
+              ↓
+🎨 Iniciar Frontend (background)
+  ↓
+⏳ Aguardar Frontend (60s max)
+  │
+  ├─ Responsável? ✅ "Frontend pronto"
+  │                     ↓
+  ├─ Parou? ❌ "Parou inesperadamente" → EXIT
+  │
+  └─ Timeout? ⚠️ "Demorou, tentando abrir..." → CONTINUA
+              ↓
+✅ Aplicação pronta!
+  ↓
+🌐 Abrir navegador
+  ↓
+PIDs: Backend=XXXX, Frontend=XXXX
+  ↓
+Aguardando... (while true)
+  ↓
+Ctrl+C → 🛑 Cleanup (matar processos)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🎯 RESULTADOS POSSÍVEIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CENÁRIO 1: Tudo OK (Caso Feliz)
+─────────────────────────────────
+✓ Python 3.13.7
+✓ venv ativado
+✓ pip atualizado
+✓ Dependências instaladas
+✓ Imports OK
+✓ Diretórios criados
+
+✅ Backend pronto em http://localhost:5000
+✅ Frontend pronto em http://localhost:3000
+
+✅ Aplicação pronta!
+🌐 Abrindo interface no navegador...
+
+Frontend: http://localhost:3000
+Backend:  http://localhost:5000
+
+PIDs: Backend=1234, Frontend=5678
+
+Para parar: pressione Ctrl+C
+
+
+CENÁRIO 2: Backend Falha Rapidamente
+─────────────────────────────────────
+⏳ Aguardando Backend carregar...
+
+❌ Backend parou inesperadamente
+Logs:
+[últimas 20 linhas do erro]
+
+
+CENÁRIO 3: Backend Demora Mas Funciona
+──────────────────────────────────────
+⏳ Aguardando Backend carregar... ......
+⚠️ Backend não respondeu após 30s
+Tentando iniciar frontend mesmo assim...
+
+🎨 Iniciando Frontend (Next.js)...
+⏳ Aguardando Frontend carregar... ..........
+
+✅ Frontend pronto em http://localhost:3000
+
+⚠️ Aplicação rodando (backend pode estar inicializando)
+
+
+CENÁRIO 4: Frontend Demora
+──────────────────────────
+✅ Backend pronto em http://localhost:5000
+
+🎨 Iniciando Frontend (Next.js)...
+⏳ Aguardando Frontend carregar... ..........................
+
+✅ Frontend pronto em http://localhost:3000
+✅ Aplicação pronta!
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🚀 COMO USAR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+./run.sh
+
+O script vai:
+1. Fazer setup automático (Python, venv, pip, deps)
+2. Iniciar backend (Python Flask)
+3. Aguardar backend até 30s (depois continua mesmo assim)
+4. Iniciar frontend (Next.js)
+5. Aguardar frontend até 60s
+6. Abrir navegador em http://localhost:3000
+7. Ficar rodando (Ctrl+C para parar)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🔍 DEBUG / TROUBLESHOOT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Se algo der errado:
+
+Ver logs do backend:
+   tail -f /tmp/backend.log
+
+Ver logs do frontend:
+   tail -f /tmp/frontend.log
+
+Ver processos rodando:
+   ps aux | grep -E "python3|node|npm"
+
+Matar todos os processos:
+   pkill -9 python3
+   pkill -9 node
+
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ BENEFÍCIOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Script não trava mais
+✓ Feedback claro sobre o que está acontecendo
+✓ Logs de erro facilmente acessíveis
+✓ Timeouts inteligentes (30s backend, 60s frontend)
+✓ Fallback para continuar se algo demorar
+✓ Verifica se processos estão rodando
+✓ Limpeza correta ao pressionar Ctrl+C
+
+═══════════════════════════════════════════════════════════════════════════════

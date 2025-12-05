@@ -43,10 +43,11 @@ def setup_websocket_handlers(sio, analyzer):
         """Handle start capture request."""
         try:
             analyzer.start()
-            emit(
+            # Broadcast to all connected clients
+            sio.emit(
                 "capture_started",
                 {"status": "started", "timestamp": datetime.now().isoformat()},
-                broadcast=True
+                room=None,
             )
             logger.info("✓ Capture started via WebSocket")
         except Exception as e:
@@ -58,10 +59,11 @@ def setup_websocket_handlers(sio, analyzer):
         """Handle stop capture request."""
         try:
             analyzer.stop()
-            emit(
+            # Broadcast to all connected clients
+            sio.emit(
                 "capture_stopped",
                 {"status": "stopped", "timestamp": datetime.now().isoformat()},
-                broadcast=True
+                room=None,
             )
             logger.info("✓ Capture stopped via WebSocket")
         except Exception as e:
@@ -140,13 +142,14 @@ def setup_websocket_handlers(sio, analyzer):
             config.save_config()
             analyzer.reload_config()
 
-            emit(
+            # Broadcast full config update to all clients
+            sio.emit(
                 "config_updated",
                 {
                     "status": "updated",
                     "timestamp": datetime.now().isoformat(),
                 },
-                broadcast=True
+                room=None,
             )
             logger.info("✓ Config updated via WebSocket")
         except Exception as e:
@@ -163,7 +166,7 @@ def setup_websocket_handlers(sio, analyzer):
                 "confidence": confidence,
                 "timestamp": datetime.now().isoformat()
             },
-            broadcast=True
+            room=None,
         )
         logger.debug(f"📝 Transcription broadcast: {text[:40]}...")
 
@@ -178,7 +181,7 @@ def setup_websocket_handlers(sio, analyzer):
                 "context_score": context_score,
                 "timestamp": datetime.now().isoformat()
             },
-            broadcast=True
+            room=None,
         )
         logger.info(f"🎯 Keyword detected broadcast: {keyword_id}")
 
@@ -190,7 +193,7 @@ def setup_websocket_handlers(sio, analyzer):
                 **status,
                 "timestamp": datetime.now().isoformat()
             },
-            broadcast=True
+            room=None,
         )
         logger.debug("🔄 Status update broadcast")
 
@@ -203,7 +206,7 @@ def setup_websocket_handlers(sio, analyzer):
                 "energy": data.get("energy", 0),
                 "timestamp": datetime.now().isoformat()
             },
-            broadcast=True
+            room=None,
         )
 
     # Register callbacks

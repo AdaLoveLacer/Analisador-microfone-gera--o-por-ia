@@ -55,7 +55,7 @@ class ContextAnalyzer:
         logger.info(f"ContextAnalyzer initialized (lazy loading)")
 
     def _load_model(self):
-        """Load model lazily on first use."""
+        """Load model lazily on first use - SEMPRE NA CPU para economizar VRAM."""
         if self.model is not None:
             return
         
@@ -63,14 +63,17 @@ class ContextAnalyzer:
             from sentence_transformers import SentenceTransformer
             import torch
 
-            # Detecta device disponível (CUDA > CPU)
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Loading embedding model on device: {self.device}")
-            if self.device == "cuda":
-                logger.info(f"CUDA GPU detected: {torch.cuda.get_device_name(0)}")
+            # IMPORTANTE: Forçar CPU para SentenceTransformer
+            # O Whisper large-v3 precisa de ~3GB de VRAM
+            # Deixar a GPU livre para o Whisper que é mais pesado
+            self.device = "cpu"
+            logger.info(f"Loading embedding model on CPU (GPU reserved for Whisper)")
 
             self.model = SentenceTransformer(self.embedding_model_name, device=self.device)
-            logger.info(f"Embedding model loaded: {self.embedding_model_name}")
+            logger.info(f"Embedding model loaded: {self.embedding_model_name} on {self.device}")
+        except Exception as e:
+            logger.error(f"Failed to load embedding model: {e}")
+            raise
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
             raise
