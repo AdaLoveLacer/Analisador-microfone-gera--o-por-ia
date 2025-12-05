@@ -81,6 +81,7 @@ export function useSystemInfo() {
         let devicesData = { devices: [] }
         let statusData: any = {}
         let llmData: any = {}
+        let gpuData: any = { available: false, name: "Desconhecida", memory_total_mb: 0, memory_free_mb: 0 }
 
         // Tentar buscar dispositivos de áudio (com retries)
         for (let i = 0; i < retries; i++) {
@@ -112,6 +113,16 @@ export function useSystemInfo() {
           llmData = { ollama_available: false, transformers_available: false, active_backend: "ollama" }
         }
 
+        // Buscar informações da GPU (novo endpoint independente do Whisper)
+        try {
+          const gpuRes = await fetchWithTimeout(`${API_BASE}/api/gpu`)
+          if (gpuRes.ok) {
+            gpuData = await gpuRes.json()
+          }
+        } catch (e) {
+          console.warn("Erro ao buscar info da GPU:", e)
+        }
+
         setSystemInfo({
           devices: devicesData.devices || [],
           whisper_status: {
@@ -125,10 +136,10 @@ export function useSystemInfo() {
             active_backend: String(llmData.active_backend || "ollama"),
           },
           gpu_info: {
-            name: statusData.whisper_device === "cuda" ? "NVIDIA CUDA" : "CPU",
-            available: statusData.whisper_device === "cuda",
-            memory_total_mb: 8192,
-            memory_free_mb: 4096,
+            name: gpuData.name || "Desconhecida",
+            available: Boolean(gpuData.available),
+            memory_total_mb: gpuData.memory_total_mb || 0,
+            memory_free_mb: gpuData.memory_free_mb || 0,
           },
         })
       } catch (err) {

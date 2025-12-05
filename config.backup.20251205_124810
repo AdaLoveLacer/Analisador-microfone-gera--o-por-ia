@@ -6,30 +6,39 @@
     "auto_start_capture": false
   },
   "audio": {
-    "device_id": -1,
+    "device_id": 13,
     "sample_rate": 16000,
     "chunk_size": 2048,
     "channels": 1,
-    "min_duration_seconds": 1.5,
+    "min_duration_seconds": 2.7,
     "silence_threshold": 0.02,
     "auto_gain_enabled": true,
-    "target_db": -20.0,
-    "max_gain_db": 20.0
+    "target_db": -20,
+    "max_gain_db": 20,
+    "max_duration_seconds": 20,
+    "silence_duration_to_stop": 1,
+    "speech_threshold": 0.015,
+    "input_device": 13
   },
   "whisper": {
-    "model": "base",
+    "model": "small",
     "language": "pt",
     "task": "transcribe",
     "fp16": false,
     "device": "auto",
     "temperature": 0.0,
     "beam_size": 5,
-    "best_of": 5,
-    "no_speech_threshold": 0.6,
+    "best_of": 6,
+    "no_speech_threshold": 0.7,
     "compression_ratio_threshold": 2.4,
-    "logprob_threshold": -1.0,
+    "logprob_threshold": -0.8,
     "condition_on_previous_text": true,
-    "initial_prompt": "Esta é uma transcrição em português brasileiro."
+    "initial_prompt": "",
+    "patience": 1,
+    "length_penalty": 1,
+    "suppress_blank": true,
+    "word_timestamps": false,
+    "hallucination_silence_threshold": null
   },
   "ai": {
     "enabled": false,
@@ -48,8 +57,18 @@
       "pattern": "sus",
       "enabled": true,
       "sound_id": "sound_sus",
-      "variations": ["suspeitoso", "estranho", "fake", "mentira"],
-      "context_keywords": ["não acredito", "mente", "fingindo", "duvidoso"],
+      "variations": [
+        "suspeitoso",
+        "estranho",
+        "fake",
+        "mentira"
+      ],
+      "context_keywords": [
+        "não acredito",
+        "mente",
+        "fingindo",
+        "duvidoso"
+      ],
       "weight": 1.0
     },
     {
@@ -58,8 +77,16 @@
       "pattern": "cringe",
       "enabled": true,
       "sound_id": "sound_cringe",
-      "variations": ["envergonhado", "desconfortável", "chato"],
-      "context_keywords": ["vergonha", "incômodo", "desconfortável"],
+      "variations": [
+        "envergonhado",
+        "desconfortável",
+        "chato"
+      ],
+      "context_keywords": [
+        "vergonha",
+        "incômodo",
+        "desconfortável"
+      ],
       "weight": 1.0
     }
   ],
@@ -92,5 +119,11 @@
     "desktop_notify": false,
     "sound_on_detection": true,
     "log_detections": true
+  },
+  "memory": {
+    "watchdog_enabled": true,
+    "max_ram_percent": 85,
+    "max_vram_percent": 90,
+    "check_interval_seconds": 5
   }
 }

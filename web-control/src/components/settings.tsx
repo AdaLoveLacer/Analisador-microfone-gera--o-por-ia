@@ -31,6 +31,12 @@ export function Settings() {
   const [minDuration, setMinDuration] = useState(2.0)
   const [maxDuration, setMaxDuration] = useState(15.0)
   const [silenceDuration, setSilenceDuration] = useState(1.0)
+  // Novos estados para controle de IA (desabilitado por padrão para economizar memória)
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [contextAnalysisEnabled, setContextAnalysisEnabled] = useState(false)
+  const [embeddingDevice, setEmbeddingDevice] = useState("cpu")
+  const [llmDevice, setLlmDevice] = useState("cpu")
+  const [aiLoading, setAiLoading] = useState(false)
 
   const { systemInfo, loading: sysLoading } = useSystemInfo()
   const { testWhisper, testing, result } = useTestWhisper()
@@ -40,7 +46,7 @@ export function Settings() {
   const { diagnosing, result: audioResult, error: audioError, runDiagnostics } = useAudioDiagnostics()
 
   useEffect(() => {
-    // carregar config de auto-gain e tempos de transcrição
+    // carregar config de auto-gain, tempos de transcrição e IA
     const loadAudioConfig = async () => {
       try {
         const cfg = await getAudioConfig()
@@ -64,6 +70,23 @@ export function Settings() {
         if (audioCfg && typeof audioCfg.silence_duration_to_stop !== 'undefined') {
           setSilenceDuration(Number(audioCfg.silence_duration_to_stop))
         }
+        // Carregar configurações de IA
+        const aiCfg = cfg?.ai || {}
+        if (typeof aiCfg.enabled !== 'undefined') {
+          setAiEnabled(Boolean(aiCfg.enabled))
+        }
+        if (typeof aiCfg.context_analysis_enabled !== 'undefined') {
+          setContextAnalysisEnabled(Boolean(aiCfg.context_analysis_enabled))
+        }
+        if (typeof aiCfg.embedding_device !== 'undefined') {
+          setEmbeddingDevice(String(aiCfg.embedding_device))
+        }
+        if (typeof aiCfg.llm_device !== 'undefined') {
+          setLlmDevice(String(aiCfg.llm_device))
+        }
+        if (typeof aiCfg.llm_backend !== 'undefined') {
+          setSelectedBackend(String(aiCfg.llm_backend))
+        }
       } catch (e) {
         // ignore
       }
@@ -72,6 +95,53 @@ export function Settings() {
 
     setMounted(true)
   }, [])
+
+  // Função para salvar configurações de IA
+  const saveAiConfig = async () => {
+    try {
+      setAiLoading(true)
+      const response = await fetch('/api/config/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: aiEnabled,
+          context_analysis_enabled: contextAnalysisEnabled,
+          embedding_device: embeddingDevice,
+          llm_device: llmDevice,
+          llm_backend: selectedBackend
+        })
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao salvar configurações de IA')
+      }
+      return { success: true, message: data.message }
+    } catch (e) {
+      return { success: false, message: String(e) }
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  // Função para descarregar modelos de IA
+  const unloadAiModels = async () => {
+    try {
+      setAiLoading(true)
+      const response = await fetch('/api/ai/unload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao descarregar modelos')
+      }
+      toast.success(`Memória liberada: ${data.unloaded?.join(', ') || 'nenhum modelo carregado'}`)
+    } catch (e) {
+      toast.error(String(e))
+    } finally {
+      setAiLoading(false)
+    }
+  }
 
   const saveSettings = async () => {
     try {
@@ -108,6 +178,13 @@ export function Settings() {
         })
       } catch (e) {
         toast.error("Erro ao salvar opções de Ganho Automático")
+        return
+      }
+
+      // Salvar configurações de IA
+      const aiResult = await saveAiConfig()
+      if (!aiResult.success) {
+        toast.error(aiResult.message)
         return
       }
 
@@ -346,9 +423,26 @@ export function Settings() {
           <Card>
             <CardHeader>
               <CardTitle>Configurações de IA</CardTitle>
-              <CardDescription>Configure o backend de análise inteligente</CardDescription>
+              <CardDescription>Configure o backend de análise inteligente (desabilitado por padrão para economizar memória)</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* AI Master Switch */}
+              <div className="p-4 bg-destructive/10 rounded-lg border border-destructive/30">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="aiEnabled" className="text-base font-semibold">IA Habilitada</Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      ⚠️ Habilitar IA consome memória RAM/VRAM. Mantenha desabilitado se não for usar.
+                    </p>
+                  </div>
+                  <Switch 
+                    id="aiEnabled" 
+                    checked={aiEnabled}
+                    onCheckedChange={setAiEnabled}
+                  />
+                </div>
+              </div>
+
               {/* AI Status */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-3 bg-muted/30 rounded-lg border border-border">
@@ -373,83 +467,185 @@ export function Settings() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">
-                <div>
-                  <Label htmlFor="contextAnalysis">Análise de Contexto</Label>
-                  <p className="text-xs text-muted-foreground mt-1">Use IA para entender o contexto das palavras</p>
-                </div>
-                <Switch id="contextAnalysis" defaultChecked />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="backend">Backend Preferido</Label>
-                <Select value={selectedBackend} onValueChange={setSelectedBackend}>
-                  <SelectTrigger id="backend">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ollama">
-                      Ollama (Local){systemInfo?.llm_config.ollama_available ? " ✓" : " ✗"}
-                    </SelectItem>
-                    <SelectItem value="transformers">
-                      Transformers{systemInfo?.llm_config.transformers_available ? " ✓" : " ✗"}
-                    </SelectItem>
-                    <SelectItem value="fallback">Fallback (Regex)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="aiModel">Modelo de IA</Label>
-                <Select defaultValue="phi">
-                  <SelectTrigger id="aiModel">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="phi">Phi 2 (Pequeno, Rápido)</SelectItem>
-                    <SelectItem value="mistral">Mistral 7B (Equilibrado)</SelectItem>
-                    <SelectItem value="neural-chat">Neural Chat (Conversação)</SelectItem>
-                    <SelectItem value="orca">Orca (Precisão)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
+              {/* Context Analysis Section */}
+              <div className={`space-y-4 p-4 rounded-lg border ${aiEnabled ? 'bg-muted/30 border-border' : 'bg-muted/10 border-muted opacity-50'}`}>
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="temperature">Temperatura (Criatividade)</Label>
-                  <span className="text-sm text-muted-foreground">{temperature / 100}</span>
+                  <div>
+                    <Label htmlFor="contextAnalysis">Análise de Contexto (Embeddings)</Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Use IA para entender o contexto das palavras (usa ~500MB-1GB de memória)
+                    </p>
+                  </div>
+                  <Switch 
+                    id="contextAnalysis" 
+                    checked={contextAnalysisEnabled}
+                    onCheckedChange={setContextAnalysisEnabled}
+                    disabled={!aiEnabled}
+                  />
                 </div>
-                <Slider
-                  id="temperature"
-                  value={[temperature]}
-                  onValueChange={(v) => setTemperature(v[0])}
-                  max={200}
-                  step={10}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Controla a criatividade da análise (0.1 = determinístico, 2.0 = criativo)
-                </p>
+
+                <div className="space-y-2">
+                  <Label htmlFor="embeddingDevice">Dispositivo para Embeddings</Label>
+                  <Select 
+                    value={embeddingDevice} 
+                    onValueChange={setEmbeddingDevice}
+                    disabled={!aiEnabled || !contextAnalysisEnabled}
+                  >
+                    <SelectTrigger id="embeddingDevice">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cpu">CPU (mais lento, usa RAM)</SelectItem>
+                      <SelectItem value="cuda">GPU/CUDA (mais rápido, usa VRAM)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    CPU recomendado para economizar VRAM para o Whisper
+                  </p>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="timeout">Timeout de Processamento (ms)</Label>
-                <Input id="timeout" type="number" defaultValue={1000} />
+              {/* LLM Section */}
+              <div className={`space-y-4 p-4 rounded-lg border ${aiEnabled ? 'bg-muted/30 border-border' : 'bg-muted/10 border-muted opacity-50'}`}>
+                <h4 className="font-semibold">Modelo de Linguagem (LLM)</h4>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="backend">Backend Preferido</Label>
+                  <Select 
+                    value={selectedBackend} 
+                    onValueChange={setSelectedBackend}
+                    disabled={!aiEnabled}
+                  >
+                    <SelectTrigger id="backend">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ollama">
+                        Ollama (Recomendado, usa pouca memória){systemInfo?.llm_config.ollama_available ? " ✓" : " ✗"}
+                      </SelectItem>
+                      <SelectItem value="transformers">
+                        Transformers (Local, usa ~4-8GB){systemInfo?.llm_config.transformers_available ? " ✓" : " ✗"}
+                      </SelectItem>
+                      <SelectItem value="fallback">Fallback (Regex, sem IA)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {selectedBackend === "transformers" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="llmDevice">Dispositivo para LLM (Transformers)</Label>
+                    <Select 
+                      value={llmDevice} 
+                      onValueChange={setLlmDevice}
+                      disabled={!aiEnabled}
+                    >
+                      <SelectTrigger id="llmDevice">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cpu">CPU (usa ~4-8GB RAM)</SelectItem>
+                        <SelectItem value="cuda">GPU/CUDA (usa ~4-8GB VRAM)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-destructive">
+                      ⚠️ Transformers consome muita memória! CPU recomendado se tiver menos de 12GB VRAM.
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="aiModel">Modelo de IA</Label>
+                  <Select defaultValue="phi" disabled={!aiEnabled}>
+                    <SelectTrigger id="aiModel">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="phi">Phi 2 (Pequeno, Rápido)</SelectItem>
+                      <SelectItem value="mistral">Mistral 7B (Equilibrado)</SelectItem>
+                      <SelectItem value="neural-chat">Neural Chat (Conversação)</SelectItem>
+                      <SelectItem value="orca">Orca (Precisão)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="maxTokens">Máximo de Tokens</Label>
-                <Select defaultValue="256">
-                  <SelectTrigger id="maxTokens">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="128">128 (Rápido)</SelectItem>
-                    <SelectItem value="256">256 (Recomendado)</SelectItem>
-                    <SelectItem value="512">512 (Detalhado)</SelectItem>
-                    <SelectItem value="1024">1024 (Muito detalhado)</SelectItem>
-                  </SelectContent>
-                </Select>
+              {/* Advanced Settings */}
+              <div className={`space-y-4 p-4 rounded-lg border ${aiEnabled ? 'bg-muted/30 border-border' : 'bg-muted/10 border-muted opacity-50'}`}>
+                <h4 className="font-semibold">Configurações Avançadas</h4>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="temperature">Temperatura (Criatividade)</Label>
+                    <span className="text-sm text-muted-foreground">{temperature / 100}</span>
+                  </div>
+                  <Slider
+                    id="temperature"
+                    value={[temperature]}
+                    onValueChange={(v) => setTemperature(v[0])}
+                    max={200}
+                    step={10}
+                    disabled={!aiEnabled}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Controla a criatividade da análise (0.1 = determinístico, 2.0 = criativo)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="timeout">Timeout de Processamento (ms)</Label>
+                  <Input id="timeout" type="number" defaultValue={1000} disabled={!aiEnabled} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="maxTokens">Máximo de Tokens</Label>
+                  <Select defaultValue="256" disabled={!aiEnabled}>
+                    <SelectTrigger id="maxTokens">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="128">128 (Rápido)</SelectItem>
+                      <SelectItem value="256">256 (Recomendado)</SelectItem>
+                      <SelectItem value="512">512 (Detalhado)</SelectItem>
+                      <SelectItem value="1024">1024 (Muito detalhado)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+
+              {/* Memory Status */}
+              {systemInfo?.gpu_info && (
+                <div className="p-4 bg-secondary/10 rounded-lg border border-secondary/30">
+                  <h4 className="font-semibold mb-2">Status de Memória</h4>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">VRAM Disponível</p>
+                      <p className="font-bold">{systemInfo.gpu_info.memory_free_mb} MB</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">VRAM Total</p>
+                      <p className="font-bold">{systemInfo.gpu_info.memory_total_mb} MB</p>
+                    </div>
+                  </div>
+                  {systemInfo.gpu_info.memory_free_mb < 4000 && (
+                    <p className="text-xs text-destructive mt-2">
+                      ⚠️ Pouca VRAM livre. Considere usar CPU para IA ou desabilitar funcionalidades.
+                    </p>
+                  )}
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="mt-3 w-full"
+                    onClick={unloadAiModels}
+                    disabled={aiLoading}
+                  >
+                    {aiLoading ? (
+                      <><Loader className="mr-2 h-4 w-4 animate-spin" /> Liberando...</>
+                    ) : (
+                      <><RefreshCw className="mr-2 h-4 w-4" /> Liberar Memória de IA</>
+                    )}
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -780,28 +976,48 @@ function WhisperSettingsCard({ systemInfo, testWhisper, testing, result }: Whisp
               <p className="text-xs text-muted-foreground mt-1">
                 {systemInfo?.whisper_status?.available
                   ? `✓ Operacional (${systemInfo.whisper_status.model})`
-                  : "✗ Não disponível"}
+                  : "✗ Modelo não carregado"}
               </p>
             </div>
-            <Button
-              size="sm"
-              onClick={testWhisper}
-              disabled={testing}
-              variant="outline"
-              className="border-primary text-primary hover:bg-primary/10"
-            >
-              {testing ? (
-                <>
-                  <Loader className="w-4 h-4 mr-2 animate-spin" />
-                  Testando...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Testar
-                </>
-              )}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={handleReloadModel}
+                disabled={reloading}
+                variant="default"
+              >
+                {reloading ? (
+                  <>
+                    <Loader className="w-4 h-4 mr-2 animate-spin" />
+                    Carregando...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Carregar Modelo
+                  </>
+                )}
+              </Button>
+              <Button
+                size="sm"
+                onClick={testWhisper}
+                disabled={testing}
+                variant="outline"
+                className="border-primary text-primary hover:bg-primary/10"
+              >
+                {testing ? (
+                  <>
+                    <Loader className="w-4 h-4 mr-2 animate-spin" />
+                    Testando...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Testar
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
 
           {result && (
@@ -850,11 +1066,11 @@ function WhisperSettingsCard({ systemInfo, testWhisper, testing, result }: Whisp
                 </Select>
                 <Button 
                   size="sm" 
-                  variant="outline" 
+                  variant={model !== config?.model ? "default" : "outline"}
                   onClick={handleReloadModel}
-                  disabled={reloading || model === config?.model}
+                  disabled={reloading}
                   className="shrink-0"
-                  title="Aplicar modelo em tempo real"
+                  title={model !== config?.model ? "Carregar novo modelo" : "Recarregar modelo atual"}
                 >
                   {reloading ? (
                     <Loader className="w-4 h-4 animate-spin" />
@@ -863,9 +1079,13 @@ function WhisperSettingsCard({ systemInfo, testWhisper, testing, result }: Whisp
                   )}
                 </Button>
               </div>
-              {model !== config?.model && (
+              {model !== config?.model ? (
                 <p className="text-xs text-warning">
-                  ⚠️ Modelo diferente do atual ({config?.model}). Clique em ↻ para aplicar agora.
+                  ⚠️ Modelo diferente do atual ({config?.model}). Clique em ↻ para aplicar.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Clique em ↻ para carregar/recarregar o modelo selecionado.
                 </p>
               )}
             </div>

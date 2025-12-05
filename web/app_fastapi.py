@@ -282,6 +282,71 @@ def create_app(analyzer: MicrophoneAnalyzer) -> FastAPI:
         """Health check para load balancers."""
         return {"status": "healthy"}
     
+    @app.get("/api/gpu")
+    async def get_gpu_info():
+        """Obtém informações da GPU independente do Whisper."""
+        try:
+            import torch
+            
+            if torch.cuda.is_available():
+                # GPU disponível
+                device_count = torch.cuda.device_count()
+                gpu_name = torch.cuda.get_device_name(0) if device_count > 0 else "NVIDIA CUDA"
+                
+                # Obter memória da GPU
+                try:
+                    total_mem = torch.cuda.get_device_properties(0).total_memory
+                    # Usar memory_reserved ao invés de memory_allocated para ter melhor estimativa
+                    reserved_mem = torch.cuda.memory_reserved(0)
+                    free_mem = total_mem - reserved_mem
+                    
+                    memory_total_mb = int(total_mem / 1024 / 1024)
+                    memory_free_mb = int(free_mem / 1024 / 1024)
+                except Exception as mem_err:
+                    logger.warning(f"Erro ao obter memória GPU: {mem_err}")
+                    memory_total_mb = 0
+                    memory_free_mb = 0
+                
+                return {
+                    "available": True,
+                    "name": gpu_name,
+                    "device_count": device_count,
+                    "memory_total_mb": memory_total_mb,
+                    "memory_free_mb": memory_free_mb,
+                    "cuda_version": torch.version.cuda or "unknown",
+                }
+            else:
+                return {
+                    "available": False,
+                    "name": "Nenhuma GPU CUDA detectada",
+                    "device_count": 0,
+                    "memory_total_mb": 0,
+                    "memory_free_mb": 0,
+                    "cuda_version": None,
+                    "reason": "torch.cuda.is_available() retornou False"
+                }
+        except ImportError:
+            return {
+                "available": False,
+                "name": "PyTorch não instalado",
+                "device_count": 0,
+                "memory_total_mb": 0,
+                "memory_free_mb": 0,
+                "cuda_version": None,
+                "reason": "PyTorch não está instalado ou não tem suporte CUDA"
+            }
+        except Exception as e:
+            logger.error(f"Erro ao obter info GPU: {e}")
+            return {
+                "available": False,
+                "name": f"Erro: {str(e)}",
+                "device_count": 0,
+                "memory_total_mb": 0,
+                "memory_free_mb": 0,
+                "cuda_version": None,
+                "reason": str(e)
+            }
+    
     # ============ ROTAS DE CAPTURA ============
     
     @app.post("/api/capture/start")
@@ -804,9 +869,29 @@ def create_app(analyzer: MicrophoneAnalyzer) -> FastAPI:
     
     @app.get("/api/llm/status")
     async def llm_status():
-        """Obtém status do engine LLM."""
+        """Obtém status do engine LLM e disponibilidade dos backends."""
         try:
-            llm_engine = getattr(app.analyzer, 'llm_engine', None)
+            # Verificar disponibilidade do Ollama
+            ollama_available = False
+            try:
+                import requests
+                response = requests.get("http://localhost:11434/api/tags", timeout=2)
+                ollama_available = response.status_code == 200
+            except:
+                pass
+            
+            # Verificar disponibilidade do Transformers
+            transformers_available = False
+            try:
+                import transformers
+                transformers_available = True
+            except ImportError:
+                pass
+            
+            # Verificar LLM engine atual
+            llm_engine = getattr(app.analyzer, '_llm_engine', None)
+            if llm_engine is None:
+                llm_engine = getattr(app.analyzer, 'llm_engine', None)
             
             if llm_engine is None:
                 return {
@@ -814,15 +899,21 @@ def create_app(analyzer: MicrophoneAnalyzer) -> FastAPI:
                     "backend": "none",
                     "model": None,
                     "device": "cpu",
-                    "error": "LLM engine não inicializado"
+                    "error": None,
+                    "ollama_available": ollama_available,
+                    "transformers_available": transformers_available,
+                    "active_backend": "ollama" if ollama_available else ("transformers" if transformers_available else "fallback")
                 }
             
             return {
-                "available": getattr(llm_engine, 'model', None) is not None,
+                "available": getattr(llm_engine, 'model', None) is not None or getattr(llm_engine, 'enabled', False),
                 "backend": getattr(llm_engine, 'backend', "unknown"),
                 "model": getattr(llm_engine, 'model_name', None),
                 "device": str(getattr(llm_engine, 'device', "cpu")),
-                "error": None
+                "error": None,
+                "ollama_available": ollama_available,
+                "transformers_available": transformers_available,
+                "active_backend": getattr(llm_engine, 'backend', "ollama")
             }
         except Exception as e:
             logger.error(f"Erro ao obter status LLM: {e}")
@@ -831,7 +922,10 @@ def create_app(analyzer: MicrophoneAnalyzer) -> FastAPI:
                 "backend": "error",
                 "model": None,
                 "device": "cpu",
-                "error": str(e)
+                "error": str(e),
+                "ollama_available": False,
+                "transformers_available": False,
+                "active_backend": "fallback"
             }
     
     @app.post("/api/llm/generate")
@@ -891,6 +985,114 @@ def create_app(analyzer: MicrophoneAnalyzer) -> FastAPI:
             }
         except Exception as e:
             logger.error(f"Erro ao obter nível de áudio: {e}")
+            return JSONResponse({"error": str(e)}, status_code=500)
+    
+    # ============ ROTAS DE CONFIGURAÇÃO IA ============
+    
+    @app.get("/api/config/ai")
+    async def get_ai_config():
+        """Obtém configurações de IA."""
+        try:
+            ai_config = app.config_manager.get("ai", {})
+            return {
+                "enabled": ai_config.get("enabled", False),
+                "context_analysis_enabled": ai_config.get("context_analysis_enabled", False),
+                "embedding_device": ai_config.get("embedding_device", "cpu"),
+                "llm_device": ai_config.get("llm_device", "cpu"),
+                "llm_backend": ai_config.get("llm_backend", "ollama"),
+            }
+        except Exception as e:
+            logger.error(f"Erro ao obter config IA: {e}")
+            return JSONResponse({"error": str(e)}, status_code=500)
+    
+    @app.post("/api/config/ai")
+    async def set_ai_config(request: Request):
+        """Atualiza configurações de IA."""
+        try:
+            data = await request.json()
+            
+            valid_devices = ["cpu", "cuda"]
+            valid_backends = ["ollama", "transformers", "fallback"]
+            
+            # Validar dispositivos
+            if "embedding_device" in data and data["embedding_device"] not in valid_devices:
+                return JSONResponse({"error": f"embedding_device inválido. Use: {valid_devices}"}, status_code=400)
+            if "llm_device" in data and data["llm_device"] not in valid_devices:
+                return JSONResponse({"error": f"llm_device inválido. Use: {valid_devices}"}, status_code=400)
+            if "llm_backend" in data and data["llm_backend"] not in valid_backends:
+                return JSONResponse({"error": f"llm_backend inválido. Use: {valid_backends}"}, status_code=400)
+            
+            # Atualizar cada configuração
+            for key, value in data.items():
+                app.config_manager.set(f"ai.{key}", value, persist=False)
+            
+            app.config_manager.save_config()
+            
+            # Aplicar mudanças aos módulos de IA
+            try:
+                # Context Analyzer
+                if hasattr(app.analyzer, '_context_analyzer') and app.analyzer._context_analyzer:
+                    ctx = app.analyzer._context_analyzer
+                    if "enabled" in data or "context_analysis_enabled" in data:
+                        ctx.set_enabled(data.get("context_analysis_enabled", data.get("enabled", False)))
+                    if "embedding_device" in data:
+                        ctx.set_device(data["embedding_device"])
+                
+                # LLM Engine
+                if hasattr(app.analyzer, '_llm_engine') and app.analyzer._llm_engine:
+                    llm = app.analyzer._llm_engine
+                    if "enabled" in data:
+                        llm.set_enabled(data.get("enabled", False), backend=data.get("llm_backend"))
+                    if "llm_device" in data:
+                        llm.set_device(data["llm_device"])
+            except Exception as ai_err:
+                logger.warning(f"Erro ao aplicar config IA em tempo real: {ai_err}")
+            
+            logger.info(f"AI config updated: {list(data.keys())}")
+            
+            return {
+                "message": "Configurações de IA atualizadas",
+                "updated_fields": list(data.keys()),
+                "note": "Algumas mudanças podem requerer reinício do backend"
+            }
+        except Exception as e:
+            logger.error(f"Erro ao atualizar config IA: {e}")
+            return JSONResponse({"error": str(e)}, status_code=500)
+    
+    @app.post("/api/ai/unload")
+    async def unload_ai_models():
+        """Descarrega modelos de IA para liberar memória."""
+        try:
+            unloaded = []
+            
+            # Descarregar Context Analyzer
+            if hasattr(app.analyzer, '_context_analyzer') and app.analyzer._context_analyzer:
+                ctx = app.analyzer._context_analyzer
+                if hasattr(ctx, 'unload') and ctx.unload():
+                    unloaded.append("context_analyzer")
+            
+            # Descarregar LLM Engine
+            if hasattr(app.analyzer, '_llm_engine') and app.analyzer._llm_engine:
+                llm = app.analyzer._llm_engine
+                if hasattr(llm, 'unload') and llm.unload():
+                    unloaded.append("llm_engine")
+            
+            # Forçar limpeza de memória
+            import gc
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except:
+                pass
+            
+            return {
+                "message": "Modelos de IA descarregados",
+                "unloaded": unloaded
+            }
+        except Exception as e:
+            logger.error(f"Erro ao descarregar modelos IA: {e}")
             return JSONResponse({"error": str(e)}, status_code=500)
     
     # ============ STATIC FILES ============

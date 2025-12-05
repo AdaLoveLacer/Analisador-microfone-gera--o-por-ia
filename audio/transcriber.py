@@ -5,6 +5,8 @@ import numpy as np
 import threading
 import queue
 import logging
+import torch
+import gc
 from typing import Optional, Dict, Any
 from pathlib import Path
 from utils.exceptions import WhisperException
@@ -106,6 +108,96 @@ class Transcriber:
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             raise WhisperException(f"Failed to load Whisper model: {e}")
+
+    def _detect_best_device(self) -> str:
+        """Detect best available device for Whisper.
+        
+        Returns:
+            'cuda' if GPU available with enough VRAM, else 'cpu'
+        """
+        try:
+            if torch.cuda.is_available():
+                # Check available VRAM
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                logger.info(f"CUDA available. GPU memory: {gpu_mem:.1f}GB")
+                return "cuda"
+            else:
+                logger.info("CUDA not available, using CPU")
+                return "cpu"
+        except Exception as e:
+            logger.warning(f"Error detecting device: {e}, defaulting to CPU")
+            return "cpu"
+
+    def unload(self) -> bool:
+        """Unload Whisper model from memory to free VRAM/RAM."""
+        try:
+            if hasattr(self, 'model') and self.model is not None:
+                del self.model
+                self.model = None
+                
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
+                logger.info("✓ Whisper model unloaded from memory")
+                return True
+        except Exception as e:
+            logger.error(f"Error unloading Whisper model: {e}")
+            return False
+        return True
+
+    def reload(self, model_name: Optional[str] = None, device: Optional[str] = None) -> bool:
+        """Reload Whisper model (optionally with different settings).
+        
+        Args:
+            model_name: New model name (or keep current)
+            device: New device (or keep current)
+        """
+        try:
+            # Unload current model first
+            self.unload()
+            
+            # Update settings if provided
+            if model_name:
+                self.model_name = model_name
+            if device:
+                self.device = device
+            elif device is None or device == "auto":
+                self.device = self._detect_best_device()
+            
+            # Update FP16 based on device
+            if self.device == "cuda":
+                self.fp16 = True
+            else:
+                self.fp16 = False
+            
+            logger.info(f"Loading Whisper model: {self.model_name} on {self.device}")
+            self.model = whisper.load_model(self.model_name, device=self.device)
+            logger.info(f"✓ Whisper model reloaded successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to reload Whisper model: {e}")
+            return False
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get transcriber status."""
+        status = {
+            "model_name": self.model_name,
+            "device": self.device,
+            "fp16": self.fp16,
+            "language": self.language,
+            "loaded": self.model is not None,
+        }
+        
+        if self.device == "cuda" and torch.cuda.is_available():
+            try:
+                status["vram_allocated_gb"] = round(torch.cuda.memory_allocated() / 1024**3, 2)
+                status["vram_reserved_gb"] = round(torch.cuda.memory_reserved() / 1024**3, 2)
+            except:
+                pass
+        
+        return status
 
     def transcribe(
         self,

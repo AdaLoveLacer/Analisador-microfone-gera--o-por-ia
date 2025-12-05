@@ -46,10 +46,10 @@ class MicrophoneAnalyzer:
         self.audio_processor: Optional[AudioProcessor] = None
         self.transcriber: Optional[TranscriberThread] = None
 
-        # AI components
+        # AI components (lazy loaded - disabled by default to save memory)
         self.keyword_detector = KeywordDetector(self.config.get_keywords())
-        self.context_analyzer = ContextAnalyzer()
-        self.llm_engine = LLMEngine()  # Nova: LLM para análise avançada
+        self._context_analyzer: Optional[ContextAnalyzer] = None
+        self._llm_engine: Optional[LLMEngine] = None
 
         # Sound component
         self.sound_manager = SoundManager(self.config.get_sounds())
@@ -83,7 +83,21 @@ class MicrophoneAnalyzer:
         self._state_lock = threading.Lock()
         self._callback_lock = threading.Lock()
 
-        logger.info("MicrophoneAnalyzer initialized")
+        logger.info("MicrophoneAnalyzer initialized (AI modules disabled by default)")
+
+    @property
+    def context_analyzer(self) -> ContextAnalyzer:
+        """Get context analyzer (lazy loaded)."""
+        if self._context_analyzer is None:
+            self._context_analyzer = ContextAnalyzer()
+        return self._context_analyzer
+
+    @property
+    def llm_engine(self) -> LLMEngine:
+        """Get LLM engine (lazy loaded)."""
+        if self._llm_engine is None:
+            self._llm_engine = LLMEngine()
+        return self._llm_engine
 
     def start(self) -> None:
         """Start the analyzer."""
@@ -466,9 +480,9 @@ class MicrophoneAnalyzer:
 
             logger.info(f"Keyword detected: {keyword_id} (confidence={confidence})")
 
-            # Perform context analysis if enabled
+            # Perform context analysis if enabled (DISABLED by default)
             context_score = 0.0
-            if self.config.get("ai.context_analysis_enabled", True):
+            if self.config.get("ai.context_analysis_enabled", False):
                 keyword_data = self.config.get_keyword(keyword_id)
                 if keyword_data:
                     context_keywords = keyword_data.get("context_keywords", [])
